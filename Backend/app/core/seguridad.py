@@ -1,3 +1,5 @@
+import secrets
+
 from app.core.config import settings
 import bcrypt
 from datetime import datetime, timedelta, timezone
@@ -25,3 +27,8 @@ def decode_token(token: str) -> dict:
         return payload
     except JWTError:
         return None
+    
+def crear_refresh_token() -> tuple[str, datetime]:
+    token = secrets.token_hex(32)
+    expiracion = datetime.now(timezone.utc) + timedelta(days=7)
+    return token, expiracion

@@ -24,3 +24,8 @@ class RefreshTokenResponse(BaseModel):
     access_token: str
     token_type: str = "bearer"
     
+class RegistroRequest(BaseModel):
+    nombre: str
+    correo: EmailStr
+    password: str
+    rol: str

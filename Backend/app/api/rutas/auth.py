@@ -1,11 +1,8 @@
 from fastapi import APIRouter, HTTPException, Depends
-from app.esquemas import usuario
-from app.esquemas.usuario import RefreshTokenRequest, UsuarioResponse
-from app.services.auth_service import autenticar_usuario, verificar_refresh_token
-from app.esquemas.usuario import LoginRequest, LoginResponse, UsuarioResponse
+from app.esquemas.usuario import LoginRequest, LoginResponse, UsuarioResponse, RefreshTokenRequest, RegistroRequest
+from app.services.auth_service import autenticar_usuario, verificar_refresh_token, guardar_refresh_token, registrar_usuario
 from sqlalchemy.orm import Session
 from app.core.seguridad import crear_token_acceso, crear_refresh_token
-from app.services.auth_service import guardar_refresh_token
 from app.BaseDeDatos import get_db
 
 
@@ -78,3 +75,31 @@ async def refresh_token(request: RefreshTokenRequest, db: Session = Depends(get_
         refresh_token=nuevo_refresh_token,  # devuelve el nuevo
         usuario=UsuarioResponse.model_validate(usuario)
     )
+
+@router.post("/registro", response_model=UsuarioResponse, tags=["Autenticación"])
+async def registrar_usuarios(request: RegistroRequest, db: Session = Depends(get_db)) -> UsuarioResponse:
+    """
+    Endpoint para registrar un nuevo usuario.
+
+    Args:
+        request (RegistroRequest): Objeto que contiene los datos del nuevo usuario.
+        db (Session): Sesión de la base de datos, inyectada automáticamente por FastAPI.
+
+    Returns:
+        UsuarioResponse: Objeto que contiene los datos del usuario registrado.
+    """
+    try:
+        # Llamar a la función de registro del servicio
+        nuevo_usuario = registrar_usuario(
+            nombre=request.nombre,
+            correo=request.correo,
+            password=request.password,
+            rol=request.rol,
+            db=db
+        )
+    except ValueError as e:
+        # Si ocurre un error (por ejemplo, correo ya registrado), lanzar una excepción HTTP 400
+        raise HTTPException(status_code=400, detail=str(e))
+    
+    # Retornar los datos del usuario registrado
+    return UsuarioResponse.model_validate(nuevo_usuario)

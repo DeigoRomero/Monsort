@@ -12,13 +12,12 @@ function Screens() {
       setShowDashboard(false);
       return;
     }
-    // Let the seal's "stamp" animation play before swapping screens.
     const id = window.setTimeout(() => setShowDashboard(true), 480);
     return () => window.clearTimeout(id);
   }, [session]);
 
   if (session && showDashboard) return <Dashboard />;
-  return <Login stamped={Boolean(session)} />;
+  return <Login />;
 }
 
 function App() {

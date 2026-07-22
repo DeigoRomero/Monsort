@@ -1,6 +1,6 @@
 // Base URL for the FastAPI backend. Configure in a .env file as VITE_API_URL.
 // Falls back to the local dev server if not set.
-export const API_URL = import.meta.env.VITE_API_URL ?? "http://localhost:8000";
+export const API_URL = import.meta.env.VITE_API_URL ?? "https://linoleum-juniper-juncture.ngrok-free.dev";
 
 export class ApiError extends Error {
   status: number;

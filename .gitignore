@@ -37,3 +37,6 @@ Thumbs.db
 # Archivos de configuración
 .mypy_cache/
 .pytest_cache/
+
+credentials.json
+node_modules

@@ -1,19 +1,19 @@
 :root {
-  /* Color tokens — verification-ledger palette */
-  --ink: #16213a;
-  --ink-soft: #2a3652;
-  --paper: #eae6dc;
-  --paper-high: #f3f0e8;
-  --seal: #b8922f;
-  --seal-dim: #8f7126;
-  --verified: #3c6e52;
+  /* Color tokens — verification-ledger palette (blue) */
+  --ink: #101b34;
+  --ink-soft: #1e2c4f;
+  --paper: #f3f5f8;
+  --paper-high: #ffffff;
+  --seal: #3b6ea5;
+  --seal-dim: #2c5480;
+  --verified: #2e7d5b;
   --error: #a33b3b;
-  --text-ink: #1c2230;
-  --text-muted: #5b6373;
-  --text-on-ink: #e9e6dc;
-  --text-on-ink-muted: #9aa4bd;
-  --hairline: rgba(28, 34, 48, 0.18);
-  --hairline-on-ink: rgba(233, 230, 220, 0.22);
+  --text-ink: #16213a;
+  --text-muted: #566078;
+  --text-on-ink: #e7ecf5;
+  --text-on-ink-muted: #9aaac4;
+  --hairline: rgba(22, 33, 58, 0.14);
+  --hairline-on-ink: rgba(231, 236, 245, 0.18);
 
   /* Type tokens */
   --font-display: "Fraunces", Georgia, serif;
@@ -21,10 +21,6 @@
   --font-mono: "IBM Plex Mono", ui-monospace, monospace;
 
   color-scheme: light;
-}
-
-* {
-  box-sizing: border-box;
 }
 
 html,

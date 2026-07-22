@@ -1,6 +1,7 @@
 from ..BaseDeDatos import Base
 from sqlalchemy import Column, DateTime, Integer, String
 from sqlalchemy.orm import relationship
+from app.modelos.factura import Facturas
     
 # Heredar de la clase Base para crear modelos de la base de datos
 class Usuarios(Base):

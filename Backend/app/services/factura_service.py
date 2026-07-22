@@ -139,7 +139,7 @@ def procesar_correos_nuevos(db):
         folio_interno = extraer_folio_interno(texto_pdf_factura)
         orden_compra_numero = extraer_orden_compra(nombre_pdf_oc or "", texto_pdf_factura)
 
-        # 6. TU TAREA: crear el objeto Facturas y guardarlo
+        # 6. crear el objeto Facturas y guardarlo
         Factura = Facturas(
             rfc=datos_factura['rfc'],
             folio_fiscal=datos_factura['folio_fiscal'],
@@ -161,7 +161,7 @@ def procesar_correos_nuevos(db):
         db.commit()
         db.refresh(Factura)
 
-        # 7. TU TAREA: por cada concepto en datos_factura['conceptos'], crear un objeto Conceptos ligado a la factura    
+        # 7. por cada concepto en datos_factura['conceptos'], crear un objeto Conceptos ligado a la factura    
 
         for concepto in datos_factura['conceptos']:
             nuevo_concepto = Conceptos(

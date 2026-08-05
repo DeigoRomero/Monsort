@@ -2,7 +2,11 @@ import { useState, type FormEvent } from "react";
 import { useAuth } from "../context/AuthContext";
 import "./Login.css";
 
-export function Login() {
+interface LoginProps {
+  onRegisterClick: () => void;
+}
+
+export function Login({ onRegisterClick }: LoginProps) {
   const { signIn, isLoading, error, clearError } = useAuth();
   const [correo, setCorreo] = useState("");
   const [password, setPassword] = useState("");
@@ -49,10 +53,7 @@ export function Login() {
           <rect width="100%" height="100%" fill="url(#wavyGrid)" />
         </svg>
 
-        <span
-          className="login-glow-dot"
-          style={{ top: "18%", left: "18%" }}
-        />
+        <span className="login-glow-dot" style={{ top: "18%", left: "18%" }} />
         <span
           className="login-glow-dot"
           style={{ top: "38%", left: "58%", animationDelay: "1.2s" }}
@@ -137,6 +138,11 @@ export function Login() {
               {isLoading ? "Verificando…" : "Iniciar sesión →"}
             </button>
           </form>
+
+          <p className="login-register-link">
+            ¿No tienes cuenta?{" "}
+            <span onClick={onRegisterClick}>Crear cuenta</span>
+          </p>
         </div>
       </main>
     </div>

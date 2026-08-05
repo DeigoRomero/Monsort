@@ -34,3 +34,17 @@ export function refreshAccessToken(refresh_token: string): Promise<RefreshRespon
     body: JSON.stringify({ refresh_token }),
   });
 }
+
+export interface RegistroData {
+  nombre: string;
+  correo: string;
+  password: string;
+  rol: string;
+}
+
+export function registro(data: RegistroData): Promise<Usuario> {
+  return apiFetch<Usuario>("/auth/registro", {
+    method: "POST",
+    body: JSON.stringify(data),
+  });
+}

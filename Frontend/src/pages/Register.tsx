@@ -1,15 +1,23 @@
 import { useState, type FormEvent } from "react";
+import { registro } from "../api/auth";
+import { ApiError } from "../api/client";
 import "./Register.css";
 
-export function Register() {
+interface RegisterProps {
+  onLoginClick: () => void;
+}
+
+export function Register({ onLoginClick }: RegisterProps) {
   const [nombre, setNombre] = useState("");
   const [correo, setCorreo] = useState("");
-  const [puesto, setPuesto] = useState("");
+  const [rol, setRol] = useState("");
   const [password, setPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
+  const [isLoading, setIsLoading] = useState(false);
+  const [success, setSuccess] = useState(false);
 
-  function handleSubmit(e: FormEvent) {
+  async function handleSubmit(e: FormEvent) {
     e.preventDefault();
     setError(null);
 
@@ -18,8 +26,43 @@ export function Register() {
       return;
     }
 
-    // TODO: conectar con el backend cuando esté listo
-    console.log({ nombre, correo, puesto, password });
+    setIsLoading(true);
+    try {
+      await registro({ nombre, correo, password, rol });
+      setSuccess(true);
+    } catch (err) {
+      if (err instanceof ApiError) {
+        setError(err.message);
+      } else {
+        setError("No se pudo conectar con el servidor. Verifica tu conexión.");
+      }
+    } finally {
+      setIsLoading(false);
+    }
+  }
+
+  if (success) {
+    return (
+      <div className="register-screen">
+        <aside className="register-side-panel" aria-hidden="true">
+          <div className="register-side-top">
+            <div className="register-logo-mark" />
+            <span className="register-logo-text">MONSORT</span>
+          </div>
+        </aside>
+        <main className="register-form-panel">
+          <div className="register-form-wrap">
+            <h1 className="register-title">Cuenta creada ✓</h1>
+            <p className="register-subtitle">
+              Tu cuenta se registró correctamente. Ya puedes iniciar sesión.
+            </p>
+            <button className="register-submit" onClick={onLoginClick}>
+              Ir a iniciar sesión →
+            </button>
+          </div>
+        </main>
+      </div>
+    );
   }
 
   return (
@@ -127,16 +170,16 @@ export function Register() {
               <span className="field-label">
                 Puesto{" "}
                 <span className="field-label-hint">
-                  (ej. empleado, supervisor, ventas, contador)
+                  (ej. desarrollador, usuario, administrador)
                 </span>
               </span>
               <input
                 className="field-input"
                 type="text"
                 required
-                value={puesto}
-                onChange={(e) => setPuesto(e.target.value)}
-                placeholder="Contador"
+                value={rol}
+                onChange={(e) => setRol(e.target.value)}
+                placeholder="Desarrollador"
               />
             </label>
 
@@ -172,13 +215,14 @@ export function Register() {
               </p>
             )}
 
-            <button className="register-submit" type="submit">
-              Crear cuenta →
+            <button className="register-submit" type="submit" disabled={isLoading}>
+              {isLoading ? "Creando cuenta…" : "Crear cuenta →"}
             </button>
           </form>
 
           <p className="register-login-link">
-            ¿Ya tienes cuenta? <span>Inicia sesión</span>
+            ¿Ya tienes cuenta?{" "}
+            <span onClick={onLoginClick}>Inicia sesión</span>
           </p>
         </div>
       </main>

@@ -4,27 +4,26 @@ import { ApiError } from "../api/client";
 import "./Facturas.css";
 
 // Colores genéricos por id_estado — ajustar cuando se confirmen los
-// estados reales definidos en la base de datos (tabla Estados).
-const ESTADO_STYLES: Record<number, { label: string; bg: string; color: string }> = {
-  1: { label: "Pendiente", bg: "#fdf1de", color: "#8a6d1f" },
-  2: { label: "Verificada", bg: "#e5f0e8", color: "#2e7d5b" },
-  3: { label: "Rechazada", bg: "#fbe7e7", color: "#a33b3b" },
+// nombres reales definidos en la tabla Estados de la base de datos.
+const ESTADO_COLORS: Record<number, { bg: string; color: string }> = {
+  1: { bg: "#fdf1de", color: "#8a6d1f" },
+  2: { bg: "#e5f0e8", color: "#2e7d5b" },
+  3: { bg: "#fbe7e7", color: "#a33b3b" },
 };
 
 function EstadoBadge({ idEstado, nombre }: { idEstado: number; nombre?: string }) {
-  const style = ESTADO_STYLES[idEstado] ?? {
-    label: nombre ?? `Estado ${idEstado}`,
-    bg: "#eef0f3",
-    color: "#566078",
-  };
+  const style = ESTADO_COLORS[idEstado] ?? { bg: "#eef0f3", color: "#566078" };
   return (
-    <span
-      className="factura-badge"
-      style={{ background: style.bg, color: style.color }}
-    >
-      {nombre ?? style.label}
+    <span className="factura-badge" style={{ background: style.bg, color: style.color }}>
+      {nombre ?? `Estado ${idEstado}`}
     </span>
   );
+}
+
+function formatMonto(valor?: string) {
+  if (!valor) return "—";
+  const num = Number(valor);
+  return Number.isNaN(num) ? valor : num.toLocaleString("es-MX", { minimumFractionDigits: 2 });
 }
 
 export function Facturas() {
@@ -47,12 +46,7 @@ export function Facturas() {
   }, []);
 
   if (seleccionada) {
-    return (
-      <FacturaDetalle
-        factura={seleccionada}
-        onVolver={() => setSeleccionada(null)}
-      />
-    );
+    return <FacturaDetalle factura={seleccionada} onVolver={() => setSeleccionada(null)} />;
   }
 
   return (
@@ -83,17 +77,13 @@ export function Facturas() {
           </thead>
           <tbody>
             {facturas.map((f) => (
-              <tr
-                key={f.id_factura}
-                className="facturas-row"
-                onClick={() => setSeleccionada(f)}
-              >
-                <td className="facturas-cell-strong">{f.folio}</td>
+              <tr key={f.id_factura} className="facturas-row" onClick={() => setSeleccionada(f)}>
+                <td className="facturas-cell-strong">{f.folio_fiscal}</td>
                 <td>{f.cliente}</td>
                 <td className="facturas-cell-muted">{f.fecha}</td>
-                <td className="facturas-cell-mono">${f.monto}</td>
+                <td className="facturas-cell-mono">${formatMonto(f.total)}</td>
                 <td>
-                  <EstadoBadge idEstado={f.id_estado} nombre={f.nombre_estado} />
+                  <EstadoBadge idEstado={f.id_estado} nombre={f.estado?.nombre_estado} />
                 </td>
               </tr>
             ))}
@@ -108,18 +98,12 @@ export function Facturas() {
   );
 }
 
-function FacturaDetalle({
-  factura,
-  onVolver,
-}: {
-  factura: Factura;
-  onVolver: () => void;
-}) {
+function FacturaDetalle({ factura, onVolver }: { factura: Factura; onVolver: () => void }) {
   const [folioInterno, setFolioInterno] = useState(factura.folio_interno ?? "");
   const [ordenCompra, setOrdenCompra] = useState(factura.orden_compra ?? "");
   const [subtotal, setSubtotal] = useState(factura.subtotal ?? "");
   const [iva, setIva] = useState(factura.iva ?? "");
-  const [total, setTotal] = useState(factura.total ?? factura.monto ?? "");
+  const [total, setTotal] = useState(factura.total ?? "");
 
   function handleGuardar() {
     // TODO: conectar con el endpoint PUT/PATCH de facturas cuando exista
@@ -140,24 +124,16 @@ function FacturaDetalle({
           ← Volver
         </span>
         <span className="factura-detalle-divider">|</span>
-        <h2 className="factura-detalle-title">Factura {factura.folio}</h2>
+        <h2 className="factura-detalle-title">Factura {factura.folio_fiscal}</h2>
         <span className="factura-detalle-badge-wrap">
-          <EstadoBadge idEstado={factura.id_estado} nombre={factura.nombre_estado} />
+          <EstadoBadge idEstado={factura.id_estado} nombre={factura.estado?.nombre_estado} />
         </span>
       </div>
 
       <div className="factura-detalle-grid">
         <Campo label="RFC" value={factura.rfc} readOnly />
-        <Campo
-          label="Folio interno"
-          value={folioInterno}
-          onChange={setFolioInterno}
-        />
-        <Campo
-          label="Orden de compra"
-          value={ordenCompra}
-          onChange={setOrdenCompra}
-        />
+        <Campo label="Folio interno" value={folioInterno} onChange={setFolioInterno} />
+        <Campo label="Orden de compra" value={ordenCompra} onChange={setOrdenCompra} />
         <Campo label="Fecha" value={factura.fecha} readOnly />
         <Campo label="Subtotal" value={subtotal} onChange={setSubtotal} mono />
         <Campo label="IVA" value={iva} onChange={setIva} mono />
@@ -169,7 +145,7 @@ function FacturaDetalle({
         <div className="factura-file-card">
           <span className="factura-file-icon">PDF</span>
           <div>
-            <p className="factura-file-name">factura_{factura.folio}.pdf</p>
+            <p className="factura-file-name">factura_{factura.folio_fiscal}.pdf</p>
             <p className="factura-file-action">Ver documento</p>
           </div>
         </div>
@@ -206,9 +182,7 @@ function Campo({
     <div className={full ? "factura-campo factura-campo-full" : "factura-campo"}>
       <label className="factura-detalle-label">{label}</label>
       {readOnly ? (
-        <div className="factura-campo-valor factura-campo-readonly">
-          {value || "—"}
-        </div>
+        <div className="factura-campo-valor factura-campo-readonly">{value || "—"}</div>
       ) : (
         <input
           className={`factura-campo-input${mono ? " factura-campo-mono" : ""}`}

@@ -178,22 +178,34 @@ def extraer_numero_oc(texto):
     if not texto:
         return None
 
-    patrones = [
-        r'PO#[_:\s]*([A-Z0-9]+)',   
-        r'P\.O\.[#:\s]*([A-Z0-9]+)', 
-        r'PO[:\s#\.]+([A-Z0-9]+)',
-        r'PO NUMBER[:\s#]*([A-Z0-9]+)',
-        r'PO N[Oo][:\s#]*([A-Z0-9]+)',  
-        r'OC[:\s#\.]+([A-Z0-9]+)', 
-        r'Purchase Order[:\s#]*([A-Z0-9]+)',
-        r'Orden de [Cc]ompra[:\s#]*([A-Z0-9]+)',
-        r'N[uú]mero Orden de Compra[:\s#]*([A-Z0-9]+)',
-        r'N[uú]mero de OC[:\s#]*([A-Z0-9]+)',
+    # 1. Intento con palabra clave explicita, pegada al numero
+    patrones_con_keyword = [
+        r'\bPO#[_:\s]*([A-Z0-9]+)',
+        r'\bP\.O\.[#:\s]*([A-Z0-9]+)',
+        r'\bPO[:\s#\.]+([A-Z0-9]+)',
+        r'\bPO NUMBER[:\s#]*([A-Z0-9]+)',
+        r'\bPO N[Oo][:\s#]*([A-Z0-9]+)',
+        r'\bOC[:\s#\.]+([A-Z0-9]+)',
+        r'\bPurchase Order[:\s#]*([A-Z0-9]+)',
+        r'\bOrden de [Cc]ompra[:\s#]*([A-Z0-9]+)',
+        r'\bN[uú]mero Orden de Compra[:\s#]*([A-Z0-9]+)',
+        r'\bN[uú]mero de OC[:\s#]*([A-Z0-9]+)',
     ]
-    for patron in patrones:
+    for patron in patrones_con_keyword:
         resultado = re.search(patron, texto, re.IGNORECASE)
         if resultado:
-            return resultado.group(1).strip()
+            valor = resultado.group(1).strip()
+            if any(c.isdigit() for c in valor):
+                return valor
+
+    # 2. Fallback: buscar un token con forma de numero de OC
+    # (letra(s) opcional + 4 o mas digitos), en cualquier parte del texto.
+    # Cubre casos como "PO THOMSON - D994876" donde el numero
+    # no esta pegado a la palabra clave.
+    candidatos = re.findall(r'\b[A-Z]{0,3}\d{4,}\b', texto.upper())
+    if candidatos:
+        return candidatos[0]
+
     return None
 
 

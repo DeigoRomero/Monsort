@@ -9,7 +9,7 @@ from alembic import context
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))  # Agrega el directorio padre al sys.path
 # importar base de datos desde BaseDeDatos.py
 from app.BaseDeDatos import Base
-from app.modelos import usuario, factura, estados, configuracion, conceptos
+from app.modelos import usuario, factura, estados, configuracion, conceptos, complemento_pago, orden_compra, cp_documento_relacionado, correo_procesado
 
 # this is the Alembic Config object, which provides
 # access to the values within the .ini file in use.

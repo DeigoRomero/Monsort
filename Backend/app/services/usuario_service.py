@@ -9,3 +9,6 @@ def obtener_usuario_sistema(db: Session):
     
 def obtener_estado_pendiente(db: Session):
     return db.query(Estados).filter(Estados.nombre_estado == "Pendiente de verificación").first()
+
+def obtener_estado(db, nombre_estado):
+    return db.query(Estados).filter(Estados.nombre_estado == nombre_estado).first()

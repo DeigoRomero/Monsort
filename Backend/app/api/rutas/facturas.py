@@ -1,33 +1,22 @@
-from fastapi import APIRouter
+from fastapi import APIRouter, Depends
+from sqlalchemy.orm import Session
+from app.BaseDeDatos import SessionLocal
+from app.services.factura_service import contar_facturas_pendientes
+from app.modelos.factura import Facturas
 
 router = APIRouter()
 
+def get_db():
+    db = SessionLocal()
+    try:
+        yield db
+    finally:
+        db.close()
+
+@router.get("/pendientes/count", tags=["Facturas"])
+def endpoint_contar_pendientes(db: Session = Depends(get_db)):
+    return {"pendientes": contar_facturas_pendientes(db)}
 
 @router.get("/", tags=["Facturas"])
-def listar_facturas():
-    return [
-        {
-            "id_factura": 1,
-            "folio": "F-1001",
-            "rfc": "ABC123456789",
-            "cliente": "Grupo Norte",
-            "fecha": "2026-07-01",
-            "banco": "Banorte",
-            "monto": "12500.00",
-            "descripcion": "Factura de servicios",
-            "id_usuario": 1,
-            "id_estado": 1,
-        },
-        {
-            "id_factura": 2,
-            "folio": "F-1002",
-            "rfc": "XYZ987654321",
-            "cliente": "Muebles del Sur",
-            "fecha": "2026-07-08",
-            "banco": "BBVA",
-            "monto": "8400.50",
-            "descripcion": "Compra de insumos",
-            "id_usuario": 1,
-            "id_estado": 2,
-        },
-    ]
+def listar_facturas(db: Session = Depends(get_db)):
+    return db.query(Facturas).all()

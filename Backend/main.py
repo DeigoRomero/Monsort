@@ -2,6 +2,7 @@ from fastapi import FastAPI
 from app.api.rutas.health import router as EstadoRouter
 from app.api.rutas.auth import router as AuthRouter
 from app.api.rutas.facturas import router as FacturaRouter
+from app.api.rutas.ordenes_compra import router as OrdenCompraRouter
 from app.modelos import usuario, factura, estados
 from fastapi.middleware.cors import CORSMiddleware
 from app.core.scheduler import scheduler
@@ -32,3 +33,4 @@ aplicacion.add_middleware(
 aplicacion.include_router(FacturaRouter, prefix="/facturas", tags=["Facturas"])
 aplicacion.include_router(EstadoRouter, prefix="/health", tags=["Health"])
 aplicacion.include_router(AuthRouter, prefix="/auth", tags=["Autenticación"])
+aplicacion.include_router(OrdenCompraRouter, prefix="/ordenes-compra", tags=["Ordenes de compra"])

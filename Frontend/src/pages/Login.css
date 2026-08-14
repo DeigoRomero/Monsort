@@ -250,3 +250,16 @@
     }
   }
 }
+
+.login-register-link {
+  text-align: center;
+  font-size: 13px;
+  color: var(--text-muted);
+  margin-top: 18px;
+}
+
+.login-register-link span {
+  color: var(--seal);
+  font-weight: 500;
+  cursor: pointer;
+}

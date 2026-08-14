@@ -1,4 +1,5 @@
 import { useAuth } from "../context/AuthContext";
+import { Facturas } from "./Facturas";
 import "./Dashboard.css";
 
 export function Dashboard() {
@@ -7,21 +8,25 @@ export function Dashboard() {
   return (
     <div className="dashboard-screen">
       <header className="dashboard-header">
-        <p className="dashboard-eyebrow">MONSORT</p>
+        <p className="dashboard-eyebrow">MONSORT · Portal interno</p>
         <button className="dashboard-signout" onClick={signOut}>
           Cerrar sesión
         </button>
       </header>
+
       <main className="dashboard-body">
-        <h1>Bienvenido, {session?.usuario.nombre}</h1>
-        <p>
+        <p className="dashboard-folio">
+          FOLIO-SESIÓN / {new Date().getFullYear()}
+        </p>
+        <h1 className="dashboard-title">
+          Bienvenido, {session?.usuario.nombre}
+        </h1>
+        <p className="dashboard-subtitle">
           Sesión iniciada como <strong>{session?.usuario.correo}</strong>{" "}
-          ({session?.usuario.rol}).
+          ({session?.usuario.rol})
         </p>
-        <p className="dashboard-note">
-          Aquí vivirá el resto de la interfaz — facturas, verificación e
-          historial.
-        </p>
+
+        <Facturas />
       </main>
     </div>
   );

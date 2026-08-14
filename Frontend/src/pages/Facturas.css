@@ -269,3 +269,30 @@
   background: var(--ink-soft);
   transform: translateY(-1px);
 }
+.factura-conceptos {
+  padding: 0 24px 24px;
+}
+
+.factura-conceptos-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12.5px;
+  margin-top: 8px;
+}
+
+.factura-conceptos-table th {
+  text-align: left;
+  padding: 8px 10px;
+  color: var(--text-muted);
+  font-weight: 500;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  background: var(--paper);
+}
+
+.factura-conceptos-table td {
+  padding: 8px 10px;
+  border-top: 1px solid var(--hairline);
+  color: var(--text-ink);
+}

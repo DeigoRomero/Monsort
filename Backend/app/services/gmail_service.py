@@ -41,9 +41,7 @@ def obtener_mensajes_nuevos(db: Session):
                     mensaje = item.get('message',[])
                     IdNuevoMensaje.append(mensaje.get('id'))
             nuevo_history_id = listaHistory.get('historyId')
-            IdGuardado.valor = nuevo_history_id
-            db.commit()
-            return IdNuevoMensaje
+            return IdNuevoMensaje, nuevo_history_id
         else:
             perfil = servicio.users().getProfile(userId='me').execute()
             history_id = perfil['historyId']
@@ -55,43 +53,44 @@ def obtener_mensajes_nuevos(db: Session):
             db.add(IdNuevo)
             db.commit()
             db.refresh(IdNuevo)
-            return []
+            return [], None
     except HttpError as error:
-        print(error)   
+        print(f"Error de Gmail API: {error}")
+        return [], None  
 
 def extraer_adjuntos(servicio, message_id):
-    """
-    Extrae los adjuntos (PDF, XML) de un mensaje de Gmail.
-    Regresa un dict con {nombre_archivo: contenido_bytes}
-    """
-
     Mensaje_completo = servicio.users().messages().get(userId='me', id=message_id, format='full').execute()
-    partes = Mensaje_completo.get('payload',{}).get('parts',[])
+    
+    # Extraer asunto de los headers
+    headers = Mensaje_completo.get('payload', {}).get('headers', [])
+    asunto = next((h['value'] for h in headers if h['name'] == 'Subject'), '')
+    
+    partes = Mensaje_completo.get('payload', {}).get('parts', [])
 
     if partes:
         adjuntos_encontrados = {}
         for part in partes:
             mime_type = part.get("mimeType")
             nombre_archivo = part.get("filename")
-            part_body = part.get("body",{})
+            part_body = part.get("body", {})
             data = part_body.get("data")
             adjunto_id = part_body.get('attachmentId')
 
             if adjunto_id:
-                if mime_type in ['application/pdf','application/xml','text/xml']:
+                if mime_type in ['application/pdf', 'application/xml', 'text/xml']:
                     adj = servicio.users().messages().attachments().get(
                         userId='me',
                         messageId=message_id,
                         id=adjunto_id
-                        ).execute()
+                    ).execute()
                     archivo_data = base64.urlsafe_b64decode(adj['data'])
                     adjuntos_encontrados[nombre_archivo] = archivo_data
             elif data and mime_type in ['text/plain', 'text/html']:
                 print(f"Body: {base64.urlsafe_b64decode(data).decode('utf-8')}")
-            
-        return adjuntos_encontrados
+
+        return adjuntos_encontrados, asunto
     else:
-        return {}
+        return {}, asunto
 
 def obtener_ultimo_mensaje(servicio):
     resultado = servicio.users().messages().list(

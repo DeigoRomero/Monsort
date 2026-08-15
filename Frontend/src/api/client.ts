@@ -22,6 +22,7 @@ export async function apiFetch<T>(
   const response = await fetch(`${API_URL}${path}`, {
     ...options,
     headers: {
+      "ngrok-skip-browser-warning": "true",
       "Content-Type": "application/json",
       ...options.headers,
     },

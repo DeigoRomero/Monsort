@@ -76,6 +76,15 @@ def construir_query_facturas(db: Session, filtros: FiltrosFactura):
     if filtros.numero_oc:
         q = q.filter(Facturas.numero_oc.ilike(f"%{filtros.numero_oc}%"))
 
+    # --- Filtro por estado ---
+    if filtros.estado:
+        if not filtros.incluir_canceladas:
+            q = q.filter(Estados.nombre_estado == filtros.estado)
+        else:
+            q = q.join(Estados, Facturas.id_estado == Estados.id_estado).filter(
+                Estados.nombre_estado == filtros.estado
+            )
+
     # --- Rango de fechas (sobre fecha_emision del CFDI) ---
     if filtros.fecha_desde:
         q = q.filter(Facturas.fecha >= filtros.fecha_desde)

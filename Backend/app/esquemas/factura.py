@@ -117,6 +117,7 @@ class FiltrosFactura(BaseModel):
     # Paginación (solo para listado, ignorado en resumen y reportes)
     pagina: int = 1
     por_pagina: int = 50
+    estado: str | None = None # nombre del estado, ej: "Pendiente de CP"
 
 
 # ---------- RESUMEN (cálculos anidados) ----------

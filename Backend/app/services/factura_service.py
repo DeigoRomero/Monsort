@@ -6,13 +6,14 @@ import pdfplumber
 import io
 import re
 import xml.etree.ElementTree as ET
-from app.modelos.factura import Facturas, Conceptos
+from app.modelos.factura import Facturas, HistorialVerificacion
+from app.modelos.conceptos import Conceptos
 from app.modelos.correo_procesado import CorreosProcesados, CorreosFallidos
 from app.modelos.orden_compra import OrdenesCompra
 from app.modelos.complemento_pago import ComplementosPago
 from app.modelos.cp_documento_relacionado import CPDocumentosRelacionados
 from app.services.usuario_service import obtener_estado
-from datetime import datetime
+from datetime import datetime, date
 
 
 # ---------- PARSEO XML ----------
@@ -27,9 +28,13 @@ def extraer_datos_xml(contenido_xml_bytes):
 
     subtotal = root.get('SubTotal')
     total = root.get('Total')
-    moneda = root.get('Moneda')
+    moneda = root.get('Moneda', 'MXN').upper()
     tipo_cambio_raw = root.get('TipoCambio')
-    tipo_cambio = None if (moneda == 'MXN' or tipo_cambio_raw == '1') else tipo_cambio_raw
+
+    if moneda == 'MXN':
+        tipo_cambio = '1'
+    else:
+        tipo_cambio = tipo_cambio_raw 
     fecha = root.get('Fecha')
 
     serie = root.get('Serie', '')
@@ -106,9 +111,13 @@ def extraer_datos_cp(xml_bytes):
     pagos = root.findall('.//pago20:Pago', namespaces)
     for pago in pagos:
         fecha_pago = pago.get('FechaPago')
-        moneda = pago.get('MonedaP')
+        moneda = pago.get('MonedaP', 'MXN').upper()
         tipo_cambio_raw = pago.get('TipoCambioP')
-        tipo_cambio = None if (moneda == 'MXN' or tipo_cambio_raw == '1') else tipo_cambio_raw
+
+        if moneda == 'MXN':
+            tipo_cambio = '1'
+        else:
+            tipo_cambio = tipo_cambio_raw
         monto = pago.get('Monto')
         forma_pago = pago.get('FormaDePagoP')
 
@@ -144,10 +153,6 @@ def extraer_texto_pdf(contenido_bytes):
 
 def clasificar_pdf(contenido_bytes, uuid_factura):
     texto_completo = extraer_texto_pdf(contenido_bytes)
-
-    # Solo el encabezado: ahi va el titulo del documento.
-    # La factura menciona "Orden de compra: XXXX" en los conceptos,
-    # pero eso queda muy abajo y no alcanza el encabezado.
     encabezado = texto_completo[:300].lower()
     texto_lower = texto_completo.lower()
 
@@ -164,7 +169,6 @@ def clasificar_pdf(contenido_bytes, uuid_factura):
     if 'factura' in encabezado or 'tipo cfdi' in encabezado:
         return "factura"
 
-    # Fallback: UUID sin guiones ni espacios, porque pdfplumber lo parte en lineas
     if uuid_factura:
         uuid_limpio = uuid_factura.replace('-', '').lower()
         texto_plano = texto_lower.replace('-', '').replace(' ', '').replace('\n', '')
@@ -178,7 +182,6 @@ def extraer_numero_oc(texto):
     if not texto:
         return None
 
-    # 1. Intento con palabra clave explicita, pegada al numero
     patrones_con_keyword = [
         r'\bPO#[_:\s]*([A-Z0-9]+)',
         r'\bP\.O\.[#:\s]*([A-Z0-9]+)',
@@ -198,10 +201,6 @@ def extraer_numero_oc(texto):
             if any(c.isdigit() for c in valor):
                 return valor
 
-    # 2. Fallback: buscar un token con forma de numero de OC
-    # (letra(s) opcional + 4 o mas digitos), en cualquier parte del texto.
-    # Cubre casos como "PO THOMSON - D994876" donde el numero
-    # no esta pegado a la palabra clave.
     candidatos = re.findall(r'\b[A-Z]{0,3}\d{4,}\b', texto.upper())
     if candidatos:
         return candidatos[0]
@@ -241,7 +240,6 @@ def procesar_factura(adjuntos, xml_bytes, mensaje_id, db, usuario_sistema):
     datos_xml = extraer_datos_xml(xml_bytes)
     uuid_factura = datos_xml['folio_fiscal']
 
-    # Dedupe: la misma factura no se guarda dos veces
     existente = db.query(Facturas).filter(
         Facturas.folio_fiscal == uuid_factura
     ).first()
@@ -260,7 +258,6 @@ def procesar_factura(adjuntos, xml_bytes, mensaje_id, db, usuario_sistema):
         elif tipo == "orden_compra":
             pdf_oc_bytes = contenido
 
-    # Estado inicial segun si detectamos el numero de OC
     if datos_xml['numero_oc']:
         estado = obtener_estado(db, "Pendiente de factura")
     else:
@@ -275,6 +272,7 @@ def procesar_factura(adjuntos, xml_bytes, mensaje_id, db, usuario_sistema):
         subtotal=float(datos_xml['subtotal']) if datos_xml['subtotal'] else None,
         iva=float(datos_xml['iva']) if datos_xml['iva'] else None,
         total=float(datos_xml['total']) if datos_xml['total'] else None,
+        moneda=datos_xml['moneda'],                    # ← corregido: se guardaba en DB pero no se asignaba
         tipo_cambio=datos_xml['tipo_cambio'],
         numero_oc=datos_xml['numero_oc'],
         numero_oc_detectado=datos_xml['numero_oc'],
@@ -304,7 +302,6 @@ def procesar_factura(adjuntos, xml_bytes, mensaje_id, db, usuario_sistema):
 def procesar_complemento_pago(adjuntos, xml_bytes, mensaje_id, db):
     datos_cp = extraer_datos_cp(xml_bytes)
 
-    # Dedupe por UUID del CP
     existente = db.query(ComplementosPago).filter(
         ComplementosPago.uuid_cp == datos_cp['uuid_cp']
     ).first()
@@ -338,7 +335,7 @@ def procesar_complemento_pago(adjuntos, xml_bytes, mensaje_id, db):
             num_parcialidad=int(doc['num_parcialidad']) if doc['num_parcialidad'] else None,
             imp_pagado=float(doc['imp_pagado']) if doc['imp_pagado'] else None,
             imp_saldo_insoluto=float(doc['imp_saldo_insoluto']) if doc['imp_saldo_insoluto'] else None,
-            id_factura=None,   # reconciliar() lo resuelve
+            id_factura=None,
             complemento=nuevo_complemento
         )
         db.add(nuevo_doc)
@@ -361,7 +358,6 @@ def procesar_orden_compra(adjuntos, asunto, mensaje_id, db):
 
     hash_archivo = hashlib.sha256(pdf_bytes).hexdigest()
 
-    # Si este archivo exacto ya existe, no duplicar
     existente = db.query(OrdenesCompra).filter(
         OrdenesCompra.hash_archivo == hash_archivo
     ).first()
@@ -383,44 +379,61 @@ def procesar_orden_compra(adjuntos, asunto, mensaje_id, db):
         message_id=mensaje_id
     )
     db.add(nueva_oc)
-    db.commit() 
+    db.commit()
 
 
 def contar_facturas_pendientes(db):
     estado_pendiente = obtener_estado_pendiente(db)
     return db.query(Facturas).filter(Facturas.id_estado == estado_pendiente.id_estado).count()
 
+
+def _obtener_id_estado_cancelada(db) -> int:
+    """Resuelve el id del estado Cancelada una sola vez por llamada."""
+    estado = obtener_estado(db, "Cancelada")
+    if not estado:
+        raise ValueError("Estado 'Cancelada' no encontrado en la BD")
+    return estado.id_estado
+
+
 def reconciliar(db):
     """
-    Enlaza OCs con facturas y CPs con facturas. Idempotente:
-    se puede correr cuantas veces sea, solo toca lo que falta.
-    Se llama desde el scheduler y desde el endpoint de correccion manual.
+    Enlaza OCs con facturas y CPs con facturas. Idempotente.
+    Las facturas y CPs cancelados se excluyen completamente.
     """
     estado_captura = obtener_estado(db, "Requiere captura manual")
     estado_pendiente_cp = obtener_estado(db, "Pendiente de CP")
     estado_revision = obtener_estado(db, "Pendiente de revisión")
+    id_estado_cancelada = _obtener_id_estado_cancelada(db)
 
     if not all([estado_captura, estado_pendiente_cp, estado_revision]):
         raise ValueError("Faltan estados en la BD: verifica los nombres en la tabla Estados")
 
-    # --- 1. Enlazar documentos de CP con facturas ---
-    docs_sueltos = db.query(CPDocumentosRelacionados).filter(
-        CPDocumentosRelacionados.id_factura.is_(None)
-    ).all()
+    # --- 1. Enlazar documentos de CP con facturas (excluir CPs cancelados) ---
+    docs_sueltos = (
+        db.query(CPDocumentosRelacionados)
+        .join(ComplementosPago, CPDocumentosRelacionados.id_complemento == ComplementosPago.id)
+        .filter(
+            CPDocumentosRelacionados.id_factura.is_(None),
+            ComplementosPago.cancelado == False          # noqa: E712
+        )
+        .all()
+    )
 
     for doc in docs_sueltos:
         factura = db.query(Facturas).filter(
-            Facturas.folio_fiscal == doc.uuid_documento
+            Facturas.folio_fiscal == doc.uuid_documento,
+            Facturas.id_estado != id_estado_cancelada   # no vincular a facturas canceladas
         ).first()
         if factura:
             doc.id_factura = factura.id_factura
 
     db.flush()
 
-    # --- 2. Enlazar facturas con su OC ---
+    # --- 2. Enlazar facturas con su OC (excluir canceladas) ---
     facturas_sin_oc = db.query(Facturas).filter(
         Facturas.id_orden_compra.is_(None),
-        Facturas.numero_oc.isnot(None)
+        Facturas.numero_oc.isnot(None),
+        Facturas.id_estado != id_estado_cancelada
     ).all()
 
     for factura in facturas_sin_oc:
@@ -430,17 +443,25 @@ def reconciliar(db):
 
         if len(ocs) == 1:
             factura.id_orden_compra = ocs[0].id
-        # 0 o >1: se deja sin enlazar, el estado lo resuelve el paso 3
 
     db.flush()
 
-    # --- 3. Recalcular estado y fecha_liquidacion de cada factura ---
-    for factura in db.query(Facturas).all():
-        # Buscar el CP que liquido esta factura (saldo insoluto en cero)
-        doc_liquidacion = db.query(CPDocumentosRelacionados).filter(
-            CPDocumentosRelacionados.id_factura == factura.id_factura,
-            CPDocumentosRelacionados.imp_saldo_insoluto == 0
-        ).first()
+    # --- 3. Recalcular estado y fecha_liquidacion (excluir canceladas) ---
+    facturas_activas = db.query(Facturas).filter(
+        Facturas.id_estado != id_estado_cancelada
+    ).all()
+
+    for factura in facturas_activas:
+        doc_liquidacion = (
+            db.query(CPDocumentosRelacionados)
+            .join(ComplementosPago, CPDocumentosRelacionados.id_complemento == ComplementosPago.id)
+            .filter(
+                CPDocumentosRelacionados.id_factura == factura.id_factura,
+                CPDocumentosRelacionados.imp_saldo_insoluto == 0,
+                ComplementosPago.cancelado == False      # noqa: E712
+            )
+            .first()
+        )
 
         if doc_liquidacion:
             cp = db.query(ComplementosPago).filter(
@@ -457,10 +478,84 @@ def reconciliar(db):
             factura.id_estado = estado_pendiente_cp.id_estado
 
         else:
-            # Tiene numero de OC pero no se pudo enlazar (no existe o ambiguo)
             factura.id_estado = estado_captura.id_estado
 
     db.commit()
+
+
+def cancelar_factura(db, id_factura: int, motivo: str, id_usuario: int) -> Facturas:
+    """
+    Cancela una factura administrativamente:
+    - Cambia su estado a Cancelada
+    - Registra el evento en HistorialVerificacion
+    - Desvincula su CP (si lo tiene), revirtiendo fecha_liquidacion
+      de las facturas que ese CP hubiera liquidado
+    """
+    factura = db.query(Facturas).filter(Facturas.id_factura == id_factura).first()
+    if not factura:
+        raise ValueError("Factura no encontrada")
+
+    id_estado_cancelada = _obtener_id_estado_cancelada(db)
+
+    if factura.id_estado == id_estado_cancelada:
+        raise ValueError("La factura ya está cancelada")
+
+    # Cambiar estado
+    factura.id_estado = id_estado_cancelada
+
+    # Registrar en historial
+    db.add(HistorialVerificacion(
+        id_factura=id_factura,
+        id_estado=id_estado_cancelada,
+        id_usuario=id_usuario,
+        fecha_verificacion=date.today(),
+        resultado_verificacion=motivo or "Cancelación administrativa",
+        origen="manual"
+    ))
+
+    db.commit()
+    return factura
+
+
+def cancelar_cp(db, id_cp: int, motivo: str, id_usuario: int) -> ComplementosPago:
+    """
+    Cancela un CP administrativamente:
+    - Marca cancelado=True con auditoría
+    - Revierte fecha_liquidacion en las facturas que liquidó
+    - reconciliar() recalcula sus estados en la siguiente corrida
+    """
+    cp = db.query(ComplementosPago).filter(ComplementosPago.id == id_cp).first()
+    if not cp:
+        raise ValueError("Complemento de pago no encontrado")
+
+    if cp.cancelado:
+        raise ValueError("El complemento de pago ya está cancelado")
+
+    cp.cancelado = True
+    cp.fecha_cancelacion = date.today()
+    cp.motivo_cancelacion = motivo or "Cancelación administrativa"
+    cp.cancelado_por = id_usuario
+
+    # Revertir fecha_liquidacion en facturas que este CP liquidó
+    docs = db.query(CPDocumentosRelacionados).filter(
+        CPDocumentosRelacionados.id_complemento == id_cp,
+        CPDocumentosRelacionados.id_factura.isnot(None)
+    ).all()
+
+    for doc in docs:
+        factura = db.query(Facturas).filter(
+            Facturas.id_factura == doc.id_factura
+        ).first()
+        if factura:
+            factura.fecha_liquidacion = None
+
+    db.commit()
+
+    # reconciliar() recalculará los estados de esas facturas
+    reconciliar(db)
+
+    return cp
+
 
 def procesar_correos_nuevos(db):
     servicio = obtener_servicio_gmail()
@@ -498,7 +593,6 @@ def procesar_correos_nuevos(db):
             ))
             db.commit()
 
-    # Reconciliar despues de procesar todo el lote
     try:
         reconciliar(db)
     except Exception as e:

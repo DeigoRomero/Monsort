@@ -2,11 +2,7 @@ import { useState, type FormEvent } from "react";
 import { useAuth } from "../context/AuthContext";
 import "./Login.css";
 
-interface LoginProps {
-  onRegisterClick: () => void;
-}
-
-export function Login({ onRegisterClick }: LoginProps) {
+export function Login() {
   const { signIn, isLoading, error, clearError } = useAuth();
   const [correo, setCorreo] = useState("");
   const [password, setPassword] = useState("");
@@ -138,11 +134,6 @@ export function Login({ onRegisterClick }: LoginProps) {
               {isLoading ? "Verificando…" : "Iniciar sesión →"}
             </button>
           </form>
-
-          <p className="login-register-link">
-            ¿No tienes cuenta?{" "}
-            <span onClick={onRegisterClick}>Crear cuenta</span>
-          </p>
         </div>
       </main>
     </div>

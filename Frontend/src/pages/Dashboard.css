@@ -48,3 +48,25 @@
   color: var(--text-muted);
   font-size: 14px;
 }
+
+.dashboard-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.dashboard-crear-usuario {
+  background: var(--seal);
+  color: #ffffff;
+  border: none;
+  border-radius: 6px;
+  padding: 8px 16px;
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: opacity 0.15s ease;
+}
+
+.dashboard-crear-usuario:hover {
+  opacity: 0.88;
+}

@@ -4,10 +4,10 @@ import { ApiError } from "../api/client";
 import "./Register.css";
 
 interface RegisterProps {
-  onLoginClick: () => void;
+  onCancelar: () => void;
 }
 
-export function Register({ onLoginClick }: RegisterProps) {
+export function Register({ onCancelar }: RegisterProps) {
   const [nombre, setNombre] = useState("");
   const [correo, setCorreo] = useState("");
   const [rol, setRol] = useState("");
@@ -43,189 +43,136 @@ export function Register({ onLoginClick }: RegisterProps) {
 
   if (success) {
     return (
-      <div className="register-screen">
-        <aside className="register-side-panel" aria-hidden="true">
-          <div className="register-side-top">
-            <div className="register-logo-mark" />
-            <span className="register-logo-text">MONSORT</span>
-          </div>
-        </aside>
-        <main className="register-form-panel">
-          <div className="register-form-wrap">
-            <h1 className="register-title">Cuenta creada ✓</h1>
-            <p className="register-subtitle">
-              Tu cuenta se registró correctamente. Ya puedes iniciar sesión.
-            </p>
-            <button className="register-submit" onClick={onLoginClick}>
-              Ir a iniciar sesión →
-            </button>
-          </div>
-        </main>
+      <div className="facturas-panel">
+        <div className="factura-detalle-header">
+          <span className="factura-volver" onClick={onCancelar}>
+            ← Volver
+          </span>
+        </div>
+        <div style={{ padding: "40px 24px", textAlign: "center" }}>
+          <h2 className="register-title">Usuario creado ✓</h2>
+          <p className="register-subtitle">
+            La cuenta de {nombre || "el empleado"} se registró correctamente.
+          </p>
+          <button
+            className="factura-btn-primary"
+            onClick={onCancelar}
+            style={{ marginTop: 8 }}
+          >
+            Volver a facturas
+          </button>
+        </div>
       </div>
     );
   }
 
   return (
-    <div className="register-screen">
-      <aside className="register-side-panel" aria-hidden="true">
-        <svg className="register-wavy-grid" xmlns="http://www.w3.org/2000/svg">
-          <defs>
-            <pattern
-              id="wavyGridRegister"
-              width="64"
-              height="64"
-              patternUnits="userSpaceOnUse"
-            >
-              <animateTransform
-                attributeName="patternTransform"
-                type="translate"
-                from="0 0"
-                to="64 64"
-                dur="14s"
-                repeatCount="indefinite"
-              />
-              <path
-                d="M0 32 Q16 14 32 32 T64 32"
-                stroke="rgba(231,236,245,0.10)"
-                fill="none"
-                strokeWidth="1"
-              />
-              <path
-                d="M32 0 Q14 16 32 32 T32 64"
-                stroke="rgba(231,236,245,0.10)"
-                fill="none"
-                strokeWidth="1"
-              />
-            </pattern>
-          </defs>
-          <rect width="100%" height="100%" fill="url(#wavyGridRegister)" />
-        </svg>
+    <div className="facturas-panel">
+      <div className="factura-detalle-header">
+        <span className="factura-volver" onClick={onCancelar}>
+          ← Volver
+        </span>
+        <span className="factura-detalle-divider">|</span>
+        <h2 className="factura-detalle-title">Crear usuario</h2>
+      </div>
 
-        <span className="register-glow-dot" style={{ top: "18%", left: "18%" }} />
-        <span
-          className="register-glow-dot"
-          style={{ top: "38%", left: "58%", animationDelay: "1.2s" }}
-        />
-        <span
-          className="register-glow-dot"
-          style={{ top: "54%", left: "30%", animationDelay: "2.1s" }}
-        />
-        <span
-          className="register-glow-dot"
-          style={{ top: "28%", left: "76%", animationDelay: "0.6s" }}
-        />
+      <form
+        className="register-form"
+        onSubmit={handleSubmit}
+        noValidate
+        style={{ padding: "24px", maxWidth: "380px" }}
+      >
+        <label className="field">
+          <span className="field-label">Nombre completo</span>
+          <input
+            className="field-input"
+            type="text"
+            autoComplete="name"
+            required
+            value={nombre}
+            onChange={(e) => setNombre(e.target.value)}
+            placeholder="Juan Pérez"
+          />
+        </label>
 
-        <div className="register-side-top">
-          <div className="register-logo-mark" />
-          <span className="register-logo-text">MONSORT</span>
-        </div>
+        <label className="field">
+          <span className="field-label">Correo electrónico</span>
+          <input
+            className="field-input"
+            type="email"
+            autoComplete="off"
+            required
+            value={correo}
+            onChange={(e) => setCorreo(e.target.value)}
+            placeholder="nombre@empresa.com"
+          />
+        </label>
 
-        <div className="register-side-middle">
-          <p className="register-side-eyebrow">Crear cuenta</p>
-          <h2 className="register-side-headline">
-            Únete al portal de verificación de facturas.
-          </h2>
-        </div>
+        <label className="field">
+          <span className="field-label">Puesto</span>
+          <select
+            className="field-input"
+            required
+            value={rol}
+            onChange={(e) => setRol(e.target.value)}
+          >
+            <option value="" disabled>
+              Selecciona un puesto
+            </option>
+            <option value="empleado">Empleado</option>
+            <option value="administrador">Administrador</option>
+          </select>
+        </label>
 
-        <p className="register-side-folio">
-          FOLIO-REGISTRO / {new Date().getFullYear()}
-        </p>
-      </aside>
+        <label className="field">
+          <span className="field-label">Contraseña temporal</span>
+          <input
+            className="field-input"
+            type="password"
+            autoComplete="new-password"
+            required
+            value={password}
+            onChange={(e) => setPassword(e.target.value)}
+            placeholder="••••••••"
+          />
+        </label>
 
-      <main className="register-form-panel">
-        <div className="register-form-wrap">
-          <h1 className="register-title">Crear cuenta</h1>
-          <p className="register-subtitle">
-            Regístrate para empezar a usar Monsort.
+        <label className="field">
+          <span className="field-label">Confirmar contraseña</span>
+          <input
+            className="field-input"
+            type="password"
+            autoComplete="new-password"
+            required
+            value={confirmPassword}
+            onChange={(e) => setConfirmPassword(e.target.value)}
+            placeholder="••••••••"
+          />
+        </label>
+
+        {error && (
+          <p className="register-error" role="alert">
+            {error}
           </p>
+        )}
 
-          <form className="register-form" onSubmit={handleSubmit} noValidate>
-            <label className="field">
-              <span className="field-label">Nombre completo</span>
-              <input
-                className="field-input"
-                type="text"
-                autoComplete="name"
-                required
-                value={nombre}
-                onChange={(e) => setNombre(e.target.value)}
-                placeholder="Juan Pérez"
-              />
-            </label>
-
-            <label className="field">
-              <span className="field-label">Correo electrónico</span>
-              <input
-                className="field-input"
-                type="email"
-                autoComplete="username"
-                required
-                value={correo}
-                onChange={(e) => setCorreo(e.target.value)}
-                placeholder="nombre@empresa.com"
-              />
-            </label>
-
-            <label className="field">
-              <span className="field-label">
-                Puesto{" "}
-                <span className="field-label-hint">
-                  (ej. desarrollador, usuario, administrador)
-                </span>
-              </span>
-              <input
-                className="field-input"
-                type="text"
-                required
-                value={rol}
-                onChange={(e) => setRol(e.target.value)}
-                placeholder="Desarrollador"
-              />
-            </label>
-
-            <label className="field">
-              <span className="field-label">Contraseña</span>
-              <input
-                className="field-input"
-                type="password"
-                autoComplete="new-password"
-                required
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-                placeholder="••••••••"
-              />
-            </label>
-
-            <label className="field">
-              <span className="field-label">Confirmar contraseña</span>
-              <input
-                className="field-input"
-                type="password"
-                autoComplete="new-password"
-                required
-                value={confirmPassword}
-                onChange={(e) => setConfirmPassword(e.target.value)}
-                placeholder="••••••••"
-              />
-            </label>
-
-            {error && (
-              <p className="register-error" role="alert">
-                {error}
-              </p>
-            )}
-
-            <button className="register-submit" type="submit" disabled={isLoading}>
-              {isLoading ? "Creando cuenta…" : "Crear cuenta →"}
-            </button>
-          </form>
-
-          <p className="register-login-link">
-            ¿Ya tienes cuenta?{" "}
-            <span onClick={onLoginClick}>Inicia sesión</span>
-          </p>
+        <div style={{ display: "flex", gap: 10, marginTop: 8 }}>
+          <button
+            type="button"
+            className="factura-btn-secondary"
+            onClick={onCancelar}
+          >
+            Cancelar
+          </button>
+          <button
+            className="factura-btn-primary"
+            type="submit"
+            disabled={isLoading}
+          >
+            {isLoading ? "Creando…" : "Crear usuario"}
+          </button>
         </div>
-      </main>
+      </form>
     </div>
   );
 }

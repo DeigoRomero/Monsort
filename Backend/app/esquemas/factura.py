@@ -13,7 +13,7 @@ class FacturaListado(BaseModel):
     id_factura: int
     folio_fiscal: str
     folio_interno: str | None
-    cliente: str
+    cliente: str | None = None
     rfc: str
     fecha: date
     numero_oc: str | None
@@ -27,6 +27,8 @@ class FacturaListado(BaseModel):
     tiene_xml: bool
     tiene_oc: bool
     tiene_cp: bool
+    fecha_limite_pago: date | None = None
+    alerta_vencimiento: str | None = None  # "vigente" | "por_vencer" | "vencida"
 
 
 class ConceptoDetalle(BaseModel):
@@ -59,7 +61,7 @@ class FacturaDetalle(BaseModel):
     id_factura: int
     folio_fiscal: str
     folio_interno: str | None
-    cliente: str
+    cliente: str | None = None
     rfc: str
     fecha: date
     numero_oc: str | None

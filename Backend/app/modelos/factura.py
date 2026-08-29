@@ -30,6 +30,10 @@ class Facturas(Base):
     id_usuario = Column(Integer, ForeignKey("Usuarios.id_usuario"), nullable=False)
     id_estado = Column(Integer, ForeignKey("Estados.id_estado"), nullable=False)
     id_orden_compra = Column(Integer, ForeignKey("ordenes_compra.id"), nullable=True)
+    id_cliente = Column(Integer, ForeignKey("Clientes.id"), nullable=True, index=True)
+    dias_plazo_pago_aplicado = Column(Integer, nullable=True)
+
+    cliente_obj = relationship("Cliente", back_populates="facturas")
 
     # Relaciones
     conceptos = relationship("Conceptos", back_populates="factura")

@@ -9,6 +9,7 @@ from app.modelos.estados import Estados
 from app.modelos.orden_compra import OrdenesCompra
 from app.modelos.complemento_pago import ComplementosPago
 from app.modelos.cp_documento_relacionado import CPDocumentosRelacionados
+from datetime import date, timedelta
 from app.esquemas.factura import (
     FacturaListado, FacturaDetalle, FacturaActualizar,
     ConceptoDetalle, ComplementoResumen, VincularOCRequest,
@@ -17,6 +18,7 @@ from app.esquemas.factura import (
 from app.services.factura_service import (
     contar_facturas_pendientes, reconciliar,
     cancelar_factura, cancelar_cp,
+    marcar_revisada, revertir_revisada,
 )
 from app.services.query_builder import construir_query_facturas, calcular_resumen
 
@@ -26,6 +28,46 @@ router = APIRouter()
 # ─────────────────────────────────────────────
 # HELPERS INTERNOS
 # ─────────────────────────────────────────────
+
+def _calcular_alerta(fecha_validacion: date | None, dias_plazo: int | None):
+    if not fecha_validacion or dias_plazo is None:
+        return None, None
+    fecha_limite = fecha_validacion + timedelta(days=dias_plazo)
+    hoy = date.today()
+    dias_restantes = (fecha_limite - hoy).days
+    if dias_restantes < 0:
+        alerta = "vencida"
+    elif dias_restantes <= 7:
+        alerta = "por_vencer"
+    else:
+        alerta = "vigente"
+    return fecha_limite, alerta
+
+def _factura_a_listado(f: Facturas, tiene_cp: bool) -> FacturaListado:
+    fecha_limite, alerta = _calcular_alerta(
+        f.fecha_validacion, f.dias_plazo_pago_aplicado
+    )
+    return FacturaListado(
+        id_factura=f.id_factura,
+        folio_fiscal=f.folio_fiscal,
+        folio_interno=f.folio_interno,
+        cliente=f.cliente,
+        rfc=f.rfc,
+        fecha=f.fecha,
+        numero_oc=f.numero_oc,
+        total=f.total,
+        moneda=f.moneda,
+        tipo_cambio=f.tipo_cambio,
+        fecha_liquidacion=f.fecha_liquidacion,
+        fecha_validacion=f.fecha_validacion,
+        estado=f.estado.nombre_estado,
+        tiene_pdf=f.pdf_factura is not None,
+        tiene_xml=f.xml_factura is not None,
+        tiene_oc=f.orden_compra_archivo is not None or f.id_orden_compra is not None,
+        tiene_cp=tiene_cp,
+        fecha_limite_pago=fecha_limite,
+        alerta_vencimiento=alerta,
+    )
 
 def _obtener_usuario_actual(db: Session) -> int:
     """
@@ -47,28 +89,6 @@ def _tiene_cp(db: Session, id_factura: int) -> bool:
             ComplementosPago.cancelado == False,   # noqa: E712
         )
         .first() is not None
-    )
-
-
-def _factura_a_listado(f: Facturas, tiene_cp: bool) -> FacturaListado:
-    return FacturaListado(
-        id_factura=f.id_factura,
-        folio_fiscal=f.folio_fiscal,
-        folio_interno=f.folio_interno,
-        cliente=f.cliente,
-        rfc=f.rfc,
-        fecha=f.fecha,
-        numero_oc=f.numero_oc,
-        total=f.total,
-        moneda=f.moneda,
-        tipo_cambio=f.tipo_cambio,
-        fecha_liquidacion=f.fecha_liquidacion,
-        fecha_validacion=f.fecha_validacion,
-        estado=f.estado.nombre_estado,
-        tiene_pdf=f.pdf_factura is not None,
-        tiene_xml=f.xml_factura is not None,
-        tiene_oc=f.orden_compra_archivo is not None or f.id_orden_compra is not None,
-        tiene_cp=tiene_cp,
     )
 
 
@@ -149,7 +169,7 @@ def listar_estados(db: Session = Depends(get_db)):
 
 
 # ─────────────────────────────────────────────
-# PENDIENTES  (badge del dashboard)
+# PENDIENTES  
 # ─────────────────────────────────────────────
 
 @router.get("/pendientes/count", tags=["Facturas"])
@@ -243,29 +263,71 @@ def obtener_factura(id_factura: int, db: Session = Depends(get_db)):
 # CORRECCIÓN MANUAL
 # ─────────────────────────────────────────────
 
-@router.patch("/{id_factura}", response_model=FacturaDetalle, tags=["Facturas"])
+@router.patch("/{id_factura}", tags=["Facturas"])
 def actualizar_factura(
     id_factura: int,
     datos: FacturaActualizar,
     db: Session = Depends(get_db),
 ):
+    """
+    Guarda las correcciones manuales y, si la factura ya tiene OC + CP,
+    la marca automáticamente como Revisada.
+    """
     f = db.query(Facturas).filter(Facturas.id_factura == id_factura).first()
     if not f:
         raise HTTPException(status_code=404, detail="Factura no encontrada")
-
-    if datos.numero_oc is not None:
-        f.numero_oc = datos.numero_oc
-        f.id_orden_compra = None
 
     if datos.folio_interno is not None:
         f.folio_interno = datos.folio_interno
 
     if datos.fecha_validacion is not None:
         f.fecha_validacion = datos.fecha_validacion
+        if f.id_cliente:
+            from app.modelos.cliente import Cliente
+            cliente = db.query(Cliente).filter(Cliente.id == f.id_cliente).first()
+            if cliente and cliente.dias_plazo_pago is not None:
+                f.dias_plazo_pago_aplicado = cliente.dias_plazo_pago
+        db.flush()
+
+    if datos.numero_oc is not None and datos.numero_oc != f.numero_oc:
+        estado_actual = f.estado.nombre_estado if f.estado else None
+        f.numero_oc = datos.numero_oc
+        f.id_orden_compra = None
+        if estado_actual == "Revisada":
+            db.commit()
+            revertir_revisada(db, id_factura, _obtener_usuario_actual(db))
+            f = db.query(Facturas).filter(Facturas.id_factura == id_factura).first()
 
     db.commit()
+
+    # reconciliar() puede vincular la OC recién corregida
     reconciliar(db)
-    return obtener_factura(id_factura, db)
+
+    # Solo después de reconciliar tiene sentido evaluar si está completa
+    id_usuario = _obtener_usuario_actual(db)
+    aplicada, motivo = marcar_revisada(db, id_factura, id_usuario)
+
+    return {
+        "factura": obtener_factura(id_factura, db),
+        "revision": {"aplicada": aplicada, "motivo": motivo},
+    }
+
+@router.patch("/{id_factura}/revisar", tags=["Facturas"])
+def marcar_revisada_endpoint(id_factura: int, db: Session = Depends(get_db)):
+    id_usuario = _obtener_usuario_actual(db)
+    aplicada, motivo = marcar_revisada(db, id_factura, id_usuario)
+    if not aplicada:
+        raise HTTPException(status_code=400, detail=motivo)
+    return {"aplicada": True, "motivo": motivo}
+
+
+@router.patch("/{id_factura}/revertir-revision", tags=["Facturas"])
+def revertir_revision_endpoint(id_factura: int, db: Session = Depends(get_db)):
+    id_usuario = _obtener_usuario_actual(db)
+    aplicada, motivo = revertir_revisada(db, id_factura, id_usuario)
+    if not aplicada:
+        raise HTTPException(status_code=400, detail=motivo)
+    return {"aplicada": True, "motivo": motivo}
 
 
 # ─────────────────────────────────────────────

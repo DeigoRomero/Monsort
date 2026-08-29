@@ -18,6 +18,8 @@ class OrdenesCompra(Base):
     
     capturada_por = Column(Integer, ForeignKey("Usuarios.id_usuario"), nullable=True)
     hash_archivo = Column(String(64), unique=True, nullable=True)
+
+    id_cliente = Column(Integer, ForeignKey("Clientes.id"), nullable=True, index=True)
     
     # Relación inversa: facturas asociadas a esta OC
     facturas = relationship("Facturas", back_populates="orden_compra")

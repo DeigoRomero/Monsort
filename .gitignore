@@ -38,5 +38,8 @@ Thumbs.db
 .mypy_cache/
 .pytest_cache/
 
+# 
+obtener_refresh_token.py
+
 credentials.json
 node_modules

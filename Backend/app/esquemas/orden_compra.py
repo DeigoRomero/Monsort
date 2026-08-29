@@ -1,5 +1,5 @@
 from pydantic import BaseModel, ConfigDict
-from datetime import datetime
+from datetime import datetime, date
 
 
 class OrdenCompraListado(BaseModel):
@@ -12,6 +12,7 @@ class OrdenCompraListado(BaseModel):
     fecha_recepcion: datetime | None
     tiene_archivo: bool
     facturas_asociadas: int
+    sin_factura_30_dias: bool = False
 
 
 class OrdenCompraActualizar(BaseModel):

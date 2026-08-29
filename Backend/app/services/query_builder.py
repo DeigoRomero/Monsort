@@ -46,6 +46,8 @@ def construir_query_facturas(db: Session, filtros: FiltrosFactura):
         Facturas.fecha_validacion,
         Facturas.id_estado,
         Facturas.id_orden_compra,
+        Facturas.id_cliente,
+        Facturas.dias_plazo_pago_aplicado,
     ]
 
     q = db.query(Facturas).options(load_only(*COLUMNAS))

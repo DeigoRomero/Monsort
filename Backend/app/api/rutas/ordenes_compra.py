@@ -1,5 +1,6 @@
 from fastapi import APIRouter, Depends, HTTPException, Response, Query
 from sqlalchemy.orm import Session
+from datetime import date
 from app.BaseDeDatos import get_db
 from app.modelos.orden_compra import OrdenesCompra
 from app.modelos.factura import Facturas
@@ -23,8 +24,13 @@ def listar_ordenes_compra(
     resultado = []
     for oc in ordenes:
         facturas_asociadas = db.query(Facturas).filter(
-            Facturas.id_orden_compra == oc.id 
+            Facturas.id_orden_compra == oc.id
         ).count()
+
+        sin_factura_30_dias = False
+        if facturas_asociadas == 0 and oc.fecha_recepcion:
+            dias = (date.today() - oc.fecha_recepcion.date()).days
+            sin_factura_30_dias = dias > 30
 
         resultado.append(OrdenCompraListado(
             id=oc.id,
@@ -33,10 +39,12 @@ def listar_ordenes_compra(
             nombre_archivo=oc.nombre_archivo,
             fecha_recepcion=oc.fecha_recepcion,
             tiene_archivo=oc.archivo is not None,
-            facturas_asociadas=facturas_asociadas
+            facturas_asociadas=facturas_asociadas,
+            sin_factura_30_dias=sin_factura_30_dias,
         ))
 
     return resultado
+
 
 @router.get("/{id_oc}", response_model=OrdenCompraListado, tags=["Ordenes de compra"])
 def obtener_orden_compra(
@@ -51,6 +59,11 @@ def obtener_orden_compra(
         Facturas.id_orden_compra == oc.id
     ).count()
 
+    sin_factura_30_dias = False
+    if facturas_asociadas == 0 and oc.fecha_recepcion:
+        dias = (date.today() - oc.fecha_recepcion.date()).days
+        sin_factura_30_dias = dias > 30
+
     return OrdenCompraListado(
         id=oc.id,
         numero_oc=oc.numero_oc,
@@ -58,8 +71,10 @@ def obtener_orden_compra(
         nombre_archivo=oc.nombre_archivo,
         fecha_recepcion=oc.fecha_recepcion,
         tiene_archivo=oc.archivo is not None,
-        facturas_asociadas=facturas_asociadas
+        facturas_asociadas=facturas_asociadas,
+        sin_factura_30_dias=sin_factura_30_dias,
     )
+
 
 @router.get("/{id_oc}/archivo", tags=["Ordenes de compra"])
 def descargar_archivo_oc(id_oc: int, db: Session = Depends(get_db)):
@@ -75,6 +90,7 @@ def descargar_archivo_oc(id_oc: int, db: Session = Depends(get_db)):
         }
     )
 
+
 @router.patch("/{id_oc}", response_model=OrdenCompraListado, tags=["Ordenes de compra"])
 def actualizar_orden_compra(
     id_oc: int,
@@ -89,12 +105,16 @@ def actualizar_orden_compra(
     db.commit()
     db.refresh(oc)
 
-    # Reconciliar facturas asociadas a esta orden de compra
     reconciliar(db)
 
     facturas_asociadas = db.query(Facturas).filter(
         Facturas.id_orden_compra == oc.id
     ).count()
+
+    sin_factura_30_dias = False
+    if facturas_asociadas == 0 and oc.fecha_recepcion:
+        dias = (date.today() - oc.fecha_recepcion.date()).days
+        sin_factura_30_dias = dias > 30
 
     return OrdenCompraListado(
         id=oc.id,
@@ -103,5 +123,6 @@ def actualizar_orden_compra(
         nombre_archivo=oc.nombre_archivo,
         fecha_recepcion=oc.fecha_recepcion,
         tiene_archivo=oc.archivo is not None,
-        facturas_asociadas=facturas_asociadas
+        facturas_asociadas=facturas_asociadas,
+        sin_factura_30_dias=sin_factura_30_dias,
     )

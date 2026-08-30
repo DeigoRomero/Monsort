@@ -15,6 +15,14 @@ from app.modelos import usuario, factura, estados, configuracion, conceptos, com
 # access to the values within the .ini file in use.
 config = context.config
 
+import os
+from dotenv import load_dotenv
+load_dotenv(os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), ".env"))
+url = os.getenv("DATABASE_URL", "")
+if not url:
+    raise RuntimeError("DATABASE_URL no está definida. Revisa Backend/.env")
+config.set_main_option("sqlalchemy.url", url.replace("%", "%%"))
+
 # Interpret the config file for Python logging.
 # This line sets up loggers basically.
 if config.config_file_name is not None:

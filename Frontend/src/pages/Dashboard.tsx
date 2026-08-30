@@ -1,54 +1,74 @@
 import { useState } from "react";
 import { useAuth } from "../context/AuthContext";
 import { Facturas } from "./Facturas";
+import { OrdenesCompra } from "./OrdenesCompra";
+import { Clientes } from "./Clientes";
 import { Register } from "./Register";
 import "./Dashboard.css";
+
+type Vista = "facturas" | "ordenes" | "clientes" | "crear-usuario";
 
 const ROLES_ADMIN = ["desarrollador", "administrador"];
 
 export function Dashboard() {
   const { session, signOut } = useAuth();
-  const [vista, setVista] = useState<"facturas" | "crear-usuario">("facturas");
+  const [vista, setVista] = useState<Vista>("facturas");
 
   const rol = session?.usuario.rol?.toLowerCase() ?? "";
   const puedeCrearUsuarios = ROLES_ADMIN.includes(rol);
 
   return (
-    <div className="dashboard-screen">
-      <header className="dashboard-header">
-        <p className="dashboard-eyebrow">MONSORT · Portal interno</p>
-        <div className="dashboard-header-actions">
+    <div className="dashboard-layout">
+      <aside className="dashboard-sidebar">
+        <div className="dashboard-sidebar-logo">
+          <div className="dashboard-logo-mark" />
+          <span className="dashboard-logo-text">MONSORT</span>
+        </div>
+
+        <nav className="dashboard-nav">
+          <button
+            className={`dashboard-nav-item${vista === "facturas" ? " active" : ""}`}
+            onClick={() => setVista("facturas")}
+          >
+            Facturas recibidas
+          </button>
+          <button
+            className={`dashboard-nav-item${vista === "ordenes" ? " active" : ""}`}
+            onClick={() => setVista("ordenes")}
+          >
+            Órdenes de compra
+          </button>
+          <button
+            className={`dashboard-nav-item${vista === "clientes" ? " active" : ""}`}
+            onClick={() => setVista("clientes")}
+          >
+            Clientes
+          </button>
+        </nav>
+
+        <div className="dashboard-sidebar-footer">
           {puedeCrearUsuarios && (
             <button
-              className="dashboard-crear-usuario"
+              className={`dashboard-nav-item${vista === "crear-usuario" ? " active" : ""}`}
               onClick={() => setVista("crear-usuario")}
             >
               + Crear usuario
             </button>
           )}
-          <button className="dashboard-signout" onClick={signOut}>
+          <button
+            className="dashboard-nav-item dashboard-signout-item"
+            onClick={signOut}
+          >
             Cerrar sesión
           </button>
         </div>
-      </header>
+      </aside>
 
-      <main className="dashboard-body">
-        {vista === "facturas" ? (
-          <>
-            <p className="dashboard-folio">
-              FOLIO-SESIÓN / {new Date().getFullYear()}
-            </p>
-            <h1 className="dashboard-title">
-              Bienvenido, {session?.usuario.nombre}
-            </h1>
-            <p className="dashboard-subtitle">
-              Sesión iniciada como <strong>{session?.usuario.correo}</strong>{" "}
-              ({session?.usuario.rol})
-            </p>
-
-            <Facturas />
-          </>
-        ) : (
+      <main className="dashboard-main">
+        {vista === "facturas" && <Facturas />}
+        {vista === "ordenes" && <OrdenesCompra />}
+        {vista === "clientes" && <Clientes />}
+        {vista === "crear-usuario" && (
           <Register onCancelar={() => setVista("facturas")} />
         )}
       </main>

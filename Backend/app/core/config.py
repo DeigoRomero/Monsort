@@ -8,6 +8,7 @@ class Settings(BaseSettings):
     GMAIL_CLIENT_ID: str
     GMAIL_CLIENT_SECRET: str
     GMAIL_REFRESH_TOKEN: str
+    banxico_token: str | None = None
     model_config = SettingsConfigDict(env_file=".env")
 
 settings = Settings()

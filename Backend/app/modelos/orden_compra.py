@@ -20,6 +20,7 @@ class OrdenesCompra(Base):
     hash_archivo = Column(String(64), unique=True, nullable=True)
 
     id_cliente = Column(Integer, ForeignKey("Clientes.id"), nullable=True, index=True)
+    origen = Column(String(20 ), nullable=False, server_default="gmail")
     
     # Relación inversa: facturas asociadas a esta OC
     facturas = relationship("Facturas", back_populates="orden_compra")

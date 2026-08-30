@@ -10,7 +10,7 @@ class Facturas(Base):
     message_id = Column(String, unique=True, nullable=True)
     folio_fiscal = Column(String, nullable=False)
     rfc = Column(String, nullable=False)
-    cliente = Column(String, nullable=False)
+    cliente = Column(String, nullable=True)
     fecha = Column(Date, nullable=False, index=True)          # índice agregado en migración
     folio_interno = Column(String, nullable=True)
     numero_oc = Column(String, nullable=True)
@@ -25,6 +25,9 @@ class Facturas(Base):
     fecha_validacion = Column(Date, nullable=True)            # captura manual en dashboard
     fecha_liquidacion = Column(Date, nullable=True)
     numero_oc_detectado = Column(String, nullable=True)       # raw del parser
+    origen = Column(String(20), nullable=False, server_default="gmail")
+    tipo_cambio_fuente = Column(String(20), nullable=True)
+
 
     # Foreign keys
     id_usuario = Column(Integer, ForeignKey("Usuarios.id_usuario"), nullable=False)

@@ -18,7 +18,7 @@ from app.services.usuario_service import obtener_estado
 from datetime import datetime, date
 
 
-ESTADOS_TERMINALES = ("Cancelada", "Revisada")
+ESTADOS_TERMINALES = ("Cancelada", "Revisada", "Histórico")
 
 
 def _ids_estados_terminales(db) -> list[int]:
@@ -711,6 +711,10 @@ def marcar_revisada(db, id_factura: int, id_usuario: int) -> tuple[bool, str]:
     id_cancelada = _obtener_id_estado_cancelada(db)
     if factura.id_estado == id_cancelada:
         return False, "No se puede revisar una factura cancelada"
+
+    estado_historico = obtener_estado(db, "Histórico")
+    if estado_historico and factura.id_estado == estado_historico.id_estado:
+        return False, "No se puede revisar una factura del histórico migrado"
 
     tiene_oc = factura.id_orden_compra is not None
     tiene_cp = _tiene_cp_activo(db, id_factura)

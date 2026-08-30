@@ -111,6 +111,8 @@ class FiltrosFactura(BaseModel):
     numero_oc: str | None = None                # ilike
     con_cp: bool | None = None                  # True = tiene CP vinculado, False = sin CP
     incluir_canceladas: bool = False            # por defecto las excluye
+    origen: str | None = None                   # 'gmail' | 'excel' | 'sat' | 'manual'
+    incluir_historico: bool = False             # el histórico del Excel se excluye por defecto
 
     # Rango de fechas (sobre Facturas.fecha = fecha_emision del CFDI)
     fecha_desde: date | None = None
@@ -134,6 +136,8 @@ class ResumenFacturas(BaseModel):
     total_con_cp: int                   # facturas que tienen CP vinculado
     total_sin_cp: int
     total_canceladas: int               # solo si incluir_canceladas=True, sino 0
+    total_historico: int        # cuántas de las anteriores vienen del Excel
+    total_mxn_historico: Decimal
 
 # ---------- CANCELACIÓN ----------
 

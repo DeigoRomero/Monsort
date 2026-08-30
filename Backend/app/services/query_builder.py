@@ -108,6 +108,13 @@ def construir_query_facturas(db: Session, filtros: FiltrosFactura):
         else:
             q = q.filter(Facturas.id_factura.notin_(subquery_cp))
 
+    # --- Histórico migrado ---
+    if not filtros.incluir_historico:
+        q = q.filter(Facturas.origen != "excel")
+
+    if filtros.origen:
+        q = q.filter(Facturas.origen == filtros.origen)
+
     return q
 
 
@@ -116,6 +123,7 @@ def calcular_resumen(db: Session, filtros: FiltrosFactura) -> ResumenFacturas:
     Corre una sola consulta de agregación sobre el mismo criterio
     que construir_query_facturas(). No trae filas a Python.
     """
+    filtros = filtros.model_copy(update={"incluir_historico": True})
     q_base = construir_query_facturas(db, filtros)
 
     # Subquery: ids de facturas con CP activo vinculado
@@ -129,22 +137,25 @@ def calcular_resumen(db: Session, filtros: FiltrosFactura) -> ResumenFacturas:
     )
 
     resultado = q_base.with_entities(
-        func.count(Facturas.id_factura).label("total_facturas"),
+        func.count(
+            case((Facturas.origen == "excel", Facturas.id_factura))
+        ).label("total_historico"),
 
-        # Total en MXN: si moneda es MXN usa total directo,
-        # si no multiplica por tipo_cambio.
         func.coalesce(
             func.sum(
-                case(
-                    (
-                        or_(Facturas.moneda == "MXN", Facturas.tipo_cambio.is_(None)),
-                        Facturas.total
-                    ),
-                    else_=Facturas.total * Facturas.tipo_cambio
-                )
+                case((
+                    Facturas.origen == "excel",
+                    case(
+                        (
+                            or_(Facturas.moneda == "MXN", Facturas.tipo_cambio.is_(None)),
+                            Facturas.total
+                        ),
+                        else_=Facturas.total * Facturas.tipo_cambio
+                    )
+                ))
             ),
             Decimal("0")
-        ).label("total_mxn"),
+        ).label("total_mxn_historico"),
 
         # Facturas con CP
         func.count(
@@ -172,4 +183,6 @@ def calcular_resumen(db: Session, filtros: FiltrosFactura) -> ResumenFacturas:
         total_con_cp=total_con_cp,
         total_sin_cp=total_facturas - total_con_cp,
         total_canceladas=total_canceladas,
+        total_historico=resultado.total_historico or 0,
+        total_mxn_historico=resultado.total_mxn_historico or Decimal("0"),
     )

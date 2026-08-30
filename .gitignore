@@ -41,5 +41,9 @@ Thumbs.db
 # 
 obtener_refresh_token.py
 
+*.xlsx
+revision*.csv
+correcciones_*.csv
+
 credentials.json
 node_modules

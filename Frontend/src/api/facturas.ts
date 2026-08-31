@@ -18,6 +18,47 @@ export interface FacturaListado {
   tiene_xml: boolean;
   tiene_oc: boolean;
   tiene_cp: boolean;
+  fecha_limite_pago: string | null;
+  alerta_vencimiento: "vigente" | "por_vencer" | "vencida" | null;
+}
+
+export interface ResumenFacturas {
+  total_facturas: number;
+  total_mxn: number;
+  total_con_cp: number;
+  total_sin_cp: number;
+  total_canceladas: number;
+  total_historico: number;
+  total_mxn_historico: number;
+}
+
+export interface ListadoFacturasResponse {
+  facturas: FacturaListado[];
+  resumen: ResumenFacturas;
+  pagina: number;
+  por_pagina: number;
+  total_paginas: number;
+}
+
+export interface FiltrosFacturas {
+  q?: string;
+  cliente?: string;
+  numero_oc?: string;
+  estado?: string;
+  con_cp?: boolean;
+  incluir_canceladas?: boolean;
+  incluir_historico?: boolean;
+  origen?: string;
+  fecha_desde?: string;
+  fecha_hasta?: string;
+  pagina?: number;
+  por_pagina?: number;
+}
+
+export interface EstadoOpcion {
+  id_estado: number;
+  nombre_estado: string;
+  descripcion_estado: string;
 }
 
 export interface OrdenCompraInfo {
@@ -61,39 +102,10 @@ export interface FacturaDetalle {
   tiene_xml: boolean;
 }
 
-export interface ResumenFacturas {
-  total_facturas: number;
-  total_mxn: number;
-  total_con_cp: number;
-  total_sin_cp: number;
-  total_canceladas: number;
-}
-
-export interface ListadoFacturasResponse {
-  facturas: FacturaListado[];
-  resumen: ResumenFacturas;
-  pagina: number;
-  por_pagina: number;
-  total_paginas: number;
-}
-
-export interface FiltrosFacturas {
-  q?: string;
-  cliente?: string;
-  numero_oc?: string;
-  estado?: string;
-  con_cp?: boolean;
-  incluir_canceladas?: boolean;
-  fecha_desde?: string;
-  fecha_hasta?: string;
-  pagina?: number;
-  por_pagina?: number;
-}
-
-export interface EstadoOpcion {
-  id_estado: number;
-  nombre_estado: string;
-  descripcion_estado: string;
+export interface FacturaActualizar {
+  numero_oc?: string | null;
+  folio_interno?: string | null;
+  fecha_validacion?: string | null;
 }
 
 function buildQuery(filtros: FiltrosFacturas): string {
@@ -105,6 +117,9 @@ function buildQuery(filtros: FiltrosFacturas): string {
   if (filtros.con_cp !== undefined) params.set("con_cp", String(filtros.con_cp));
   if (filtros.incluir_canceladas !== undefined)
     params.set("incluir_canceladas", String(filtros.incluir_canceladas));
+  if (filtros.incluir_historico !== undefined)
+    params.set("incluir_historico", String(filtros.incluir_historico));
+  if (filtros.origen) params.set("origen", filtros.origen);
   if (filtros.fecha_desde) params.set("fecha_desde", filtros.fecha_desde);
   if (filtros.fecha_hasta) params.set("fecha_hasta", filtros.fecha_hasta);
   if (filtros.pagina) params.set("pagina", String(filtros.pagina));
@@ -148,12 +163,6 @@ export function vincularOc(
   });
 }
 
-export interface FacturaActualizar {
-  numero_oc?: string | null;
-  folio_interno?: string | null;
-  fecha_validacion?: string | null;
-}
-
 export function actualizarFactura(
   idFactura: number,
   datos: FacturaActualizar
@@ -185,15 +194,11 @@ export function urlPdfFactura(idFactura: number): string {
   return `${API_URL}/facturas/${idFactura}/pdf`;
 }
 
-// ---------- Reportes PDF ----------
-
 async function descargarPdf(url: string, nombreArchivo: string) {
   const response = await fetch(url, {
     headers: { "ngrok-skip-browser-warning": "true" },
   });
-  if (!response.ok) {
-    throw new Error("No se pudo generar el reporte.");
-  }
+  if (!response.ok) throw new Error("No se pudo generar el reporte.");
   const blob = await response.blob();
   const objectUrl = URL.createObjectURL(blob);
   const a = document.createElement("a");

@@ -18,13 +18,16 @@ import {
   type EstadoOpcion,
 } from "../api/facturas";
 import { ApiError } from "../api/client";
-import { CancelarModal } from "../components/CancelarModal";
+import { CancelarModal } from "../Components/CancelarModal";
 import "./Facturas.css";
 
 function estiloEstado(nombre: string) {
   const n = nombre.toLowerCase();
   if (n.includes("cancel")) return { bg: "#eef0f3", color: "#8a92a5" };
-  if (n.includes("verific") || n.includes("aprob")) return { bg: "#e5f0e8", color: "#2e7d5b" };
+  if (n.includes("históric") || n.includes("historic"))
+    return { bg: "#eef0f3", color: "#566078" };
+  if (n.includes("verific") || n.includes("aprob") || n.includes("revisad"))
+    return { bg: "#e5f0e8", color: "#2e7d5b" };
   if (n.includes("rechaz") || n.includes("error")) return { bg: "#fbe7e7", color: "#a33b3b" };
   return { bg: "#fdf1de", color: "#8a6d1f" };
 }
@@ -36,6 +39,30 @@ function EstadoBadge({ nombre }: { nombre: string }) {
       {nombre}
     </span>
   );
+}
+
+function AlertaVencimiento({
+  alerta,
+}: {
+  alerta: "vigente" | "por_vencer" | "vencida" | null;
+}) {
+  if (!alerta) return <span style={{ color: "#c4cad6", fontSize: 12 }}>—</span>;
+  const estilos = {
+    vigente: { bg: "#e5f0e8", color: "#2e7d5b", label: "Vigente" },
+    por_vencer: { bg: "#fdf1de", color: "#8a6d1f", label: "Por vencer" },
+    vencida: { bg: "#fbe7e7", color: "#a33b3b", label: "Vencida" },
+  };
+  const s = estilos[alerta];
+  return (
+    <span className="factura-badge" style={{ background: s.bg, color: s.color }}>
+      {s.label}
+    </span>
+  );
+}
+
+function esHistorica(estado: string) {
+  const n = estado.toLowerCase();
+  return n.includes("históric") || n.includes("historic");
 }
 
 function formatMonto(valor?: number | null) {
@@ -53,15 +80,16 @@ export function Facturas() {
   const [error, setError] = useState<string | null>(null);
   const [idSeleccionado, setIdSeleccionado] = useState<number | null>(null);
 
-  // filtros
   const [q, setQ] = useState("");
   const [cliente, setCliente] = useState("");
   const [numeroOc, setNumeroOc] = useState("");
+  const [estadoFiltro, setEstadoFiltro] = useState("");
+  const [origen, setOrigen] = useState("");
   const [conCp, setConCp] = useState<"todos" | "true" | "false">("todos");
   const [incluirCanceladas, setIncluirCanceladas] = useState(false);
+  const [incluirHistorico, setIncluirHistorico] = useState(false);
   const [fechaDesde, setFechaDesde] = useState("");
   const [fechaHasta, setFechaHasta] = useState("");
-  const [estadoFiltro, setEstadoFiltro] = useState(""); // filtrado en frontend, ver nota
 
   const [descargandoReporte, setDescargandoReporte] = useState(false);
 
@@ -69,12 +97,22 @@ export function Facturas() {
     listarEstados().then(setEstados).catch(() => {});
   }, []);
 
-  // debounce de búsqueda y filtros
   useEffect(() => {
     const id = setTimeout(() => cargar(1), 400);
     return () => clearTimeout(id);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [q, cliente, numeroOc, estadoFiltro, conCp, incluirCanceladas, fechaDesde, fechaHasta]);
+  }, [
+    q,
+    cliente,
+    numeroOc,
+    estadoFiltro,
+    origen,
+    conCp,
+    incluirCanceladas,
+    incluirHistorico,
+    fechaDesde,
+    fechaHasta,
+  ]);
 
   function filtrosActuales(paginaOverride?: number): FiltrosFacturas {
     return {
@@ -82,8 +120,10 @@ export function Facturas() {
       cliente: cliente || undefined,
       numero_oc: numeroOc || undefined,
       estado: estadoFiltro || undefined,
+      origen: origen || undefined,
       con_cp: conCp === "todos" ? undefined : conCp === "true",
       incluir_canceladas: incluirCanceladas,
+      incluir_historico: incluirHistorico,
       fecha_desde: fechaDesde || undefined,
       fecha_hasta: fechaHasta || undefined,
       pagina: paginaOverride ?? pagina,
@@ -102,7 +142,9 @@ export function Facturas() {
         setTotalPaginas(res.total_paginas);
       })
       .catch((err) => {
-        setError(err instanceof ApiError ? err.message : "No se pudieron cargar las facturas.");
+        setError(
+          err instanceof ApiError ? err.message : "No se pudieron cargar las facturas."
+        );
       })
       .finally(() => setIsLoading(false));
   }
@@ -181,6 +223,17 @@ export function Facturas() {
           </select>
           <select
             className="field-input"
+            value={origen}
+            onChange={(e) => setOrigen(e.target.value)}
+          >
+            <option value="">Todos los orígenes</option>
+            <option value="gmail">Gmail</option>
+            <option value="excel">Excel (histórico)</option>
+            <option value="sat">SAT</option>
+            <option value="manual">Manual</option>
+          </select>
+          <select
+            className="field-input"
             value={conCp}
             onChange={(e) => setConCp(e.target.value as typeof conCp)}
           >
@@ -202,39 +255,59 @@ export function Facturas() {
           />
         </div>
 
-        <label className="facturas-checkbox">
-          <input
-            type="checkbox"
-            checked={incluirCanceladas}
-            onChange={(e) => setIncluirCanceladas(e.target.checked)}
-          />
-          Incluir canceladas
-        </label>
+        <div style={{ display: "flex", gap: 20 }}>
+          <label className="facturas-checkbox">
+            <input
+              type="checkbox"
+              checked={incluirCanceladas}
+              onChange={(e) => setIncluirCanceladas(e.target.checked)}
+            />
+            Incluir canceladas
+          </label>
+          <label className="facturas-checkbox">
+            <input
+              type="checkbox"
+              checked={incluirHistorico}
+              onChange={(e) => setIncluirHistorico(e.target.checked)}
+            />
+            Incluir histórico migrado
+          </label>
+        </div>
       </div>
 
       {resumen && (
-        <div className="facturas-resumen">
-          <div>
-            <p className="facturas-resumen-label">Facturas</p>
-            <p className="facturas-resumen-valor">{resumen.total_facturas}</p>
+        <>
+          <div className="facturas-resumen">
+            <div>
+              <p className="facturas-resumen-label">Facturas</p>
+              <p className="facturas-resumen-valor">{resumen.total_facturas}</p>
+            </div>
+            <div>
+              <p className="facturas-resumen-label">Total MXN</p>
+              <p className="facturas-resumen-valor">${formatMonto(resumen.total_mxn)}</p>
+            </div>
+            <div>
+              <p className="facturas-resumen-label">Con CP</p>
+              <p className="facturas-resumen-valor">{resumen.total_con_cp}</p>
+            </div>
+            <div>
+              <p className="facturas-resumen-label">Sin CP</p>
+              <p className="facturas-resumen-valor">{resumen.total_sin_cp}</p>
+            </div>
+            <div>
+              <p className="facturas-resumen-label">Canceladas</p>
+              <p className="facturas-resumen-valor">{resumen.total_canceladas}</p>
+            </div>
           </div>
-          <div>
-            <p className="facturas-resumen-label">Total MXN</p>
-            <p className="facturas-resumen-valor">${formatMonto(resumen.total_mxn)}</p>
-          </div>
-          <div>
-            <p className="facturas-resumen-label">Con CP</p>
-            <p className="facturas-resumen-valor">{resumen.total_con_cp}</p>
-          </div>
-          <div>
-            <p className="facturas-resumen-label">Sin CP</p>
-            <p className="facturas-resumen-valor">{resumen.total_sin_cp}</p>
-          </div>
-          <div>
-            <p className="facturas-resumen-label">Canceladas</p>
-            <p className="facturas-resumen-valor">{resumen.total_canceladas}</p>
-          </div>
-        </div>
+
+          {resumen.total_historico > 0 && (
+            <p className="facturas-nota-historico">
+              El total incluye {resumen.total_historico} facturas del histórico migrado
+              (${formatMonto(resumen.total_mxn_historico)}), que no se muestran en la
+              tabla salvo que actives “Incluir histórico migrado”.
+            </p>
+          )}
+        </>
       )}
 
       {isLoading && <p className="facturas-status">Cargando facturas…</p>}
@@ -250,31 +323,49 @@ export function Facturas() {
                 <th>Fecha</th>
                 <th>Total</th>
                 <th>Estado</th>
+                <th>Vencimiento</th>
               </tr>
             </thead>
             <tbody>
-              {facturas.map((f) => (
-                <tr
-                  key={f.id_factura}
-                  className={`facturas-row${f.estado.toLowerCase().includes("cancel") ? " facturas-row-cancelada" : ""}`}
-                  onClick={() => setIdSeleccionado(f.id_factura)}
-                >
-                  <td className="facturas-cell-strong">{f.folio_fiscal}</td>
-                  <td>{f.cliente}</td>
-                  <td className="facturas-cell-muted">{f.fecha}</td>
-                  <td className="facturas-cell-mono">
-                    ${formatMonto(f.total)} {f.moneda && f.moneda !== "MXN" ? f.moneda : ""}
-                  </td>
-                  <td>
-                    <EstadoBadge nombre={f.estado} />
-                  </td>
-                </tr>
-              ))}
+              {facturas.map((f) => {
+                const historica = esHistorica(f.estado);
+                const cancelada = f.estado.toLowerCase().includes("cancel");
+                return (
+                  <tr
+                    key={f.id_factura}
+                    className={`facturas-row${
+                      cancelada || historica ? " facturas-row-cancelada" : ""
+                    }`}
+                    onClick={() => setIdSeleccionado(f.id_factura)}
+                  >
+                    <td className="facturas-cell-strong">
+                      {f.folio_fiscal}
+                      {historica && (
+                        <span className="facturas-tag-historico">histórico</span>
+                      )}
+                    </td>
+                    <td>{f.cliente}</td>
+                    <td className="facturas-cell-muted">{f.fecha}</td>
+                    <td className="facturas-cell-mono">
+                      ${formatMonto(f.total)}{" "}
+                      {f.moneda && f.moneda !== "MXN" ? f.moneda : ""}
+                    </td>
+                    <td>
+                      <EstadoBadge nombre={f.estado} />
+                    </td>
+                    <td>
+                      <AlertaVencimiento alerta={f.alerta_vencimiento} />
+                    </td>
+                  </tr>
+                );
+              })}
             </tbody>
           </table>
 
           {facturas.length === 0 && (
-            <p className="facturas-status">No hay facturas que coincidan con los filtros.</p>
+            <p className="facturas-status">
+              No hay facturas que coincidan con los filtros.
+            </p>
           )}
 
           <div className="facturas-paginacion">
@@ -339,7 +430,9 @@ function FacturaDetalleView({
         setFechaValidacion(f.fecha_validacion ?? "");
       })
       .catch((err) => {
-        setError(err instanceof ApiError ? err.message : "No se pudo cargar la factura.");
+        setError(
+          err instanceof ApiError ? err.message : "No se pudo cargar la factura."
+        );
       })
       .finally(() => setIsLoading(false));
   }
@@ -348,7 +441,9 @@ function FacturaDetalleView({
     setMostrarCandidatas(true);
     listarOcsCandidatas(idFactura)
       .then(setCandidatas)
-      .catch(() => setError("No se pudieron cargar las órdenes de compra candidatas."));
+      .catch(() =>
+        setError("No se pudieron cargar las órdenes de compra candidatas.")
+      );
   }
 
   async function handleVincular(idOrdenCompra: number) {
@@ -360,7 +455,11 @@ function FacturaDetalleView({
       setNumeroOc(actualizada.numero_oc ?? "");
       setMostrarCandidatas(false);
     } catch (err) {
-      setError(err instanceof ApiError ? err.message : "No se pudo vincular la orden de compra.");
+      setError(
+        err instanceof ApiError
+          ? err.message
+          : "No se pudo vincular la orden de compra."
+      );
     } finally {
       setIsVinculando(false);
     }
@@ -379,7 +478,9 @@ function FacturaDetalleView({
       setGuardadoOk(true);
       cargarFactura();
     } catch (err) {
-      setError(err instanceof ApiError ? err.message : "No se pudo guardar la factura.");
+      setError(
+        err instanceof ApiError ? err.message : "No se pudo guardar la factura."
+      );
     } finally {
       setIsSaving(false);
     }
@@ -391,7 +492,9 @@ function FacturaDetalleView({
       setMostrarCancelar(false);
       onVolver();
     } catch (err) {
-      setError(err instanceof ApiError ? err.message : "No se pudo cancelar la factura.");
+      setError(
+        err instanceof ApiError ? err.message : "No se pudo cancelar la factura."
+      );
     }
   }
 
@@ -424,6 +527,8 @@ function FacturaDetalleView({
     );
   }
 
+  const historica = esHistorica(factura.estado);
+
   return (
     <div className="facturas-panel">
       <div className="factura-detalle-header">
@@ -437,18 +542,31 @@ function FacturaDetalleView({
         </span>
       </div>
 
+      {historica && (
+        <p className="facturas-nota-historico">
+          Esta factura viene del histórico migrado desde Excel. No tiene archivos
+          adjuntos ni fecha de validación, y no puede marcarse como revisada.
+        </p>
+      )}
+
       <div className="factura-detalle-grid">
         <div className="factura-campo">
           <label className="factura-detalle-label">Cliente</label>
-          <div className="factura-campo-valor factura-campo-readonly">{factura.cliente}</div>
+          <div className="factura-campo-valor factura-campo-readonly">
+            {factura.cliente}
+          </div>
         </div>
         <div className="factura-campo">
           <label className="factura-detalle-label">RFC</label>
-          <div className="factura-campo-valor factura-campo-readonly">{factura.rfc}</div>
+          <div className="factura-campo-valor factura-campo-readonly">
+            {factura.rfc}
+          </div>
         </div>
         <div className="factura-campo">
           <label className="factura-detalle-label">Fecha</label>
-          <div className="factura-campo-valor factura-campo-readonly">{factura.fecha}</div>
+          <div className="factura-campo-valor factura-campo-readonly">
+            {factura.fecha}
+          </div>
         </div>
         <div className="factura-campo">
           <label className="factura-detalle-label">Subtotal</label>
@@ -465,12 +583,17 @@ function FacturaDetalleView({
         <div className="factura-campo">
           <label className="factura-detalle-label">Total</label>
           <div className="factura-campo-valor factura-campo-readonly factura-campo-mono">
-            ${formatMonto(factura.total)} {factura.moneda && factura.moneda !== "MXN" ? factura.moneda : ""}
+            ${formatMonto(factura.total)}{" "}
+            {factura.moneda && factura.moneda !== "MXN" ? factura.moneda : ""}
           </div>
         </div>
 
         <Campo label="Número de OC" value={numeroOc} onChange={setNumeroOc} />
-        <Campo label="Folio interno" value={folioInterno} onChange={setFolioInterno} />
+        <Campo
+          label="Folio interno"
+          value={folioInterno}
+          onChange={setFolioInterno}
+        />
         <div className="factura-campo">
           <label className="factura-detalle-label">Fecha de validación</label>
           <input
@@ -478,6 +601,7 @@ function FacturaDetalleView({
             type="date"
             value={fechaValidacion}
             onChange={(e) => setFechaValidacion(e.target.value)}
+            disabled={historica}
           />
         </div>
       </div>
@@ -489,36 +613,66 @@ function FacturaDetalleView({
             <p style={{ margin: 0, fontWeight: 600, color: "var(--text-ink)" }}>
               {factura.orden_compra.numero_oc}
             </p>
-            <p style={{ margin: "2px 0 0", fontSize: 12.5, color: "var(--text-muted)" }}>
+            <p
+              style={{
+                margin: "2px 0 0",
+                fontSize: 12.5,
+                color: "var(--text-muted)",
+              }}
+            >
               Recibida el {factura.orden_compra.fecha_recepcion.slice(0, 10)}
             </p>
           </div>
         ) : (
-          <p className="facturas-status" style={{ padding: 0, textAlign: "left", margin: "0 0 10px" }}>
+          <p
+            className="facturas-status"
+            style={{ padding: 0, textAlign: "left", margin: "0 0 10px" }}
+          >
             Esta factura no tiene una orden de compra vinculada todavía.
           </p>
         )}
 
         {!mostrarCandidatas ? (
           <button className="factura-btn-secondary" onClick={handleVerCandidatas}>
-            {factura.orden_compra ? "Cambiar vínculo con OC" : "Vincular orden de compra"}
+            {factura.orden_compra
+              ? "Cambiar vínculo con OC"
+              : "Vincular orden de compra"}
           </button>
         ) : (
           <div className="factura-candidatas">
             {candidatas.length === 0 ? (
-              <p className="facturas-status" style={{ padding: 0, textAlign: "left" }}>
+              <p
+                className="facturas-status"
+                style={{ padding: 0, textAlign: "left" }}
+              >
                 No hay órdenes de compra candidatas para esta factura.
               </p>
             ) : (
               candidatas.map((c) => (
                 <div key={c.id} className="factura-candidata-card">
                   <div>
-                    <p style={{ margin: "0 0 3px", fontWeight: 600, fontSize: 13.5, color: "var(--text-ink)" }}>
+                    <p
+                      style={{
+                        margin: "0 0 3px",
+                        fontWeight: 600,
+                        fontSize: 13.5,
+                        color: "var(--text-ink)",
+                      }}
+                    >
                       {c.numero_oc}
                     </p>
-                    <p style={{ margin: 0, fontSize: 12, color: "var(--text-muted)" }}>
-                      Recibida {c.fecha_recepcion.slice(0, 10)} · {c.facturas_asociadas}{" "}
-                      {c.facturas_asociadas === 1 ? "factura asociada" : "facturas asociadas"}
+                    <p
+                      style={{
+                        margin: 0,
+                        fontSize: 12,
+                        color: "var(--text-muted)",
+                      }}
+                    >
+                      Recibida {c.fecha_recepcion.slice(0, 10)} ·{" "}
+                      {c.facturas_asociadas}{" "}
+                      {c.facturas_asociadas === 1
+                        ? "factura asociada"
+                        : "facturas asociadas"}
                     </p>
                   </div>
                   <button
@@ -544,7 +698,7 @@ function FacturaDetalleView({
 
       <div className="factura-detalle-archivo">
         <label className="factura-detalle-label">Archivo</label>
-        {factura.tiene_pdf ? (
+               {factura.tiene_pdf ? (
           <a
             className="factura-file-card"
             href={urlPdfFactura(factura.id_factura)}
@@ -558,14 +712,20 @@ function FacturaDetalleView({
             </div>
           </a>
         ) : (
-          <p className="facturas-status" style={{ padding: 0, textAlign: "left" }}>
+          <p
+            className="facturas-status"
+            style={{ padding: 0, textAlign: "left" }}
+          >
             Esta factura no tiene PDF adjunto.
           </p>
         )}
       </div>
 
       {guardadoOk && !error && (
-        <p className="facturas-status" style={{ color: "#2e7d5b", textAlign: "left", padding: 0 }}>
+        <p
+          className="facturas-status"
+          style={{ color: "#2e7d5b", textAlign: "left", padding: "0 24px" }}
+        >
           Cambios guardados ✓
         </p>
       )}
@@ -575,10 +735,18 @@ function FacturaDetalleView({
         <button className="cancelar-btn" onClick={() => setMostrarCancelar(true)}>
           Cancelar factura
         </button>
-        <button className="factura-btn-secondary" onClick={handleReporteDetalle} disabled={descargando}>
+        <button
+          className="factura-btn-secondary"
+          onClick={handleReporteDetalle}
+          disabled={descargando}
+        >
           {descargando ? "Generando…" : "Reporte detalle"}
         </button>
-        <button className="factura-btn-primary" onClick={handleGuardar} disabled={isSaving}>
+        <button
+          className="factura-btn-primary"
+          onClick={handleGuardar}
+          disabled={isSaving}
+        >
           {isSaving ? "Guardando…" : "Guardar cambios"}
         </button>
       </div>

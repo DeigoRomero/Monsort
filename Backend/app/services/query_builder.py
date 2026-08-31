@@ -137,6 +137,21 @@ def calcular_resumen(db: Session, filtros: FiltrosFactura) -> ResumenFacturas:
     )
 
     resultado = q_base.with_entities(
+        func.count(Facturas.id_factura).label("total_facturas"),
+
+        func.coalesce(
+            func.sum(
+                case(
+                    (
+                        or_(Facturas.moneda == "MXN", Facturas.tipo_cambio.is_(None)),
+                        Facturas.total
+                    ),
+                    else_=Facturas.total * Facturas.tipo_cambio
+                )
+            ),
+            Decimal("0")
+        ).label("total_mxn"),
+
         func.count(
             case((Facturas.origen == "excel", Facturas.id_factura))
         ).label("total_historico"),

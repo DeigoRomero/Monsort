@@ -14,7 +14,9 @@ from app.esquemas.factura import (
     FacturaListado, FacturaDetalle, FacturaActualizar,
     ConceptoDetalle, ComplementoResumen, VincularOCRequest,
     FiltrosFactura, ResumenFacturas, CancelarRequest, FacturaListadoConResumen,
+    RespuestaVerificacionSat,
 )
+from app.services.verificacion_service import verificar_una
 from app.services.factura_service import (
     contar_facturas_pendientes, reconciliar,
     cancelar_factura, cancelar_cp,
@@ -353,6 +355,31 @@ def cancelar_factura_endpoint(
 
     return obtener_factura(id_factura, db)
 
+# ─────────────────────────────────────────────
+# VERIFICACIÓN ANTE EL SAT
+# ─────────────────────────────────────────────
+
+@router.post(
+    "/{id_factura}/verificar-sat",
+    response_model=RespuestaVerificacionSat,
+    tags=["Facturas"],
+)
+def verificar_sat_endpoint(id_factura: int, db: Session = Depends(get_db)):
+    """
+    Consulta el estatus del CFDI ante el SAT y sincroniza el estado local.
+
+    Si el SAT reporta 'Cancelado' y la factura no lo está, cambia su estado
+    a Cancelada y deja registro en HistorialVerificacion con origen='sat'.
+    El SAT tiene autoridad sobre el estado local, incluso terminales.
+
+    Puede tardar hasta 30 segundos: el webservice del SAT es lento.
+    """
+    resultado = verificar_una(db, id_factura, aplicar=True)
+
+    if resultado is None:
+        raise HTTPException(status_code=404, detail="Factura no encontrada")
+
+    return resultado
 
 # ─────────────────────────────────────────────
 # CANCELACIÓN DE CP

@@ -103,7 +103,7 @@ systemctl is-active --quiet "$SERVICIO" \
 
 azul "Verificando que responda"
 for intento in 1 2 3 4 5; do
-    if curl -fsS --max-time 5 http://127.0.0.1:8000/health >/dev/null 2>&1; then
+    if curl -fsS --max-time 5 http://127.0.0.1:8000/health/ >/dev/null 2>&1; then
         verde "  /health responde"
         break
     fi

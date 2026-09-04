@@ -51,7 +51,7 @@ id_rsa.*
 secrets.json
 secretos.json
 config.local.*
-
+credentials.json
 
 # -----------------------------------------------------------------------------
 # 2. DATOS FISCALES Y DE CLIENTES

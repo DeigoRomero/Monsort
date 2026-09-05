@@ -5,6 +5,7 @@ import hashlib
 import pdfplumber
 import io
 import re
+import logging
 import xml.etree.ElementTree as ET
 from app.modelos.factura import Facturas, HistorialVerificacion
 from app.modelos.conceptos import Conceptos
@@ -18,6 +19,7 @@ from app.services.usuario_service import obtener_estado
 from datetime import datetime, date
 
 
+logger = logging.getLogger(__name__)
 ESTADOS_TERMINALES = ("Cancelada", "Revisada", "Histórico")
 
 
@@ -563,9 +565,25 @@ def procesar_correo(adjuntos, asunto, mensaje_id, db, usuario_sistema) -> dict:
     # se tratan como OC de todos modos (comportamiento del código anterior)
     if not any(resumen.values()):
         for item in indice_pdfs:
-            if not item["asignado"]:
-                if procesar_orden_compra_suelta(item, asunto, mensaje_id, db):
-                    resumen["ordenes"] += 1
+            if item["asignado"] or not item["es_oc"]:
+                continue
+            if procesar_orden_compra_suelta(item, asunto, mensaje_id, db):
+                resumen["ordenes"] += 1
+            else:
+                # PDF que parece OC pero ya existe en la base.
+                # Se marca asignado para que no se reintente.
+                item["asignado"] = True
+
+        # Si quedaron PDFs sin asignar y sin patrón de OC, se ignoran.
+        # Es preferible no capturar a llenar OrdenesCompra de basura.
+        sin_clasificar = [i for i in indice_pdfs if not i["asignado"]]
+        if sin_clasificar:
+            logger.info(
+                "Correo %s: %d PDF(s) sin clasificar ignorados: %s",
+                mensaje_id,
+                len(sin_clasificar),
+                [i["nombre"] for i in sin_clasificar],
+            )
 
     return resumen
 

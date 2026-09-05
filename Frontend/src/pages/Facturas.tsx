@@ -65,9 +65,14 @@ function esHistorica(estado: string) {
   return n.includes("históric") || n.includes("historic");
 }
 
-function formatMonto(valor?: number | null) {
-  if (valor === null || valor === undefined) return "—";
-  return valor.toLocaleString("es-MX", { minimumFractionDigits: 2 });
+function formatMonto(valor?: number | string | null) {
+  if (valor === null || valor === undefined || valor === "") return "—";
+  const num = typeof valor === "string" ? Number(valor) : valor;
+  if (Number.isNaN(num)) return "—";
+  return num.toLocaleString("es-MX", {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  });
 }
 
 export function Facturas() {
@@ -87,7 +92,6 @@ export function Facturas() {
   const [origen, setOrigen] = useState("");
   const [conCp, setConCp] = useState<"todos" | "true" | "false">("todos");
   const [incluirCanceladas, setIncluirCanceladas] = useState(false);
-  const [incluirHistorico, setIncluirHistorico] = useState(false);
   const [fechaDesde, setFechaDesde] = useState("");
   const [fechaHasta, setFechaHasta] = useState("");
 
@@ -109,7 +113,6 @@ export function Facturas() {
     origen,
     conCp,
     incluirCanceladas,
-    incluirHistorico,
     fechaDesde,
     fechaHasta,
   ]);
@@ -123,7 +126,7 @@ export function Facturas() {
       origen: origen || undefined,
       con_cp: conCp === "todos" ? undefined : conCp === "true",
       incluir_canceladas: incluirCanceladas,
-      incluir_historico: incluirHistorico,
+      incluir_historico: true,
       fecha_desde: fechaDesde || undefined,
       fecha_hasta: fechaHasta || undefined,
       pagina: paginaOverride ?? pagina,
@@ -241,36 +244,34 @@ export function Facturas() {
             <option value="true">Solo con CP</option>
             <option value="false">Solo sin CP</option>
           </select>
-          <input
-            className="field-input"
-            type="date"
-            value={fechaDesde}
-            onChange={(e) => setFechaDesde(e.target.value)}
-          />
-          <input
-            className="field-input"
-            type="date"
-            value={fechaHasta}
-            onChange={(e) => setFechaHasta(e.target.value)}
-          />
         </div>
 
-        <div style={{ display: "flex", gap: 20 }}>
-          <label className="facturas-checkbox">
+        <div className="facturas-rango-fechas">
+          <div className="facturas-rango-campo">
+            <label className="facturas-rango-label">Desde</label>
+            <input
+              className="field-input"
+              type="date"
+              value={fechaDesde}
+              onChange={(e) => setFechaDesde(e.target.value)}
+            />
+          </div>
+          <div className="facturas-rango-campo">
+            <label className="facturas-rango-label">Hasta</label>
+            <input
+              className="field-input"
+              type="date"
+              value={fechaHasta}
+              onChange={(e) => setFechaHasta(e.target.value)}
+            />
+          </div>
+          <label className="facturas-checkbox facturas-checkbox-inline">
             <input
               type="checkbox"
               checked={incluirCanceladas}
               onChange={(e) => setIncluirCanceladas(e.target.checked)}
             />
             Incluir canceladas
-          </label>
-          <label className="facturas-checkbox">
-            <input
-              type="checkbox"
-              checked={incluirHistorico}
-              onChange={(e) => setIncluirHistorico(e.target.checked)}
-            />
-            Incluir histórico migrado
           </label>
         </div>
       </div>
@@ -303,8 +304,7 @@ export function Facturas() {
           {resumen.total_historico > 0 && (
             <p className="facturas-nota-historico">
               El total incluye {resumen.total_historico} facturas del histórico migrado
-              (${formatMonto(resumen.total_mxn_historico)}), que no se muestran en la
-              tabla salvo que actives “Incluir histórico migrado”.
+              (${formatMonto(resumen.total_mxn_historico)}).
             </p>
           )}
         </>
@@ -333,9 +333,7 @@ export function Facturas() {
                 return (
                   <tr
                     key={f.id_factura}
-                    className={`facturas-row${
-                      cancelada || historica ? " facturas-row-cancelada" : ""
-                    }`}
+                    className={`facturas-row${cancelada ? " facturas-row-cancelada" : ""}`}
                     onClick={() => setIdSeleccionado(f.id_factura)}
                   >
                     <td className="facturas-cell-strong">
@@ -698,7 +696,7 @@ function FacturaDetalleView({
 
       <div className="factura-detalle-archivo">
         <label className="factura-detalle-label">Archivo</label>
-               {factura.tiene_pdf ? (
+        {factura.tiene_pdf ? (
           <a
             className="factura-file-card"
             href={urlPdfFactura(factura.id_factura)}

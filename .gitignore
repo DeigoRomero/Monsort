@@ -1,49 +1,251 @@
-# Environment variables
+# =============================================================================
+# Monsort - .gitignore
+# Monorepo: backend/ (FastAPI) + frontend/ (React + Vite)
+# =============================================================================
+
+
+# -----------------------------------------------------------------------------
+# 1. SECRETOS  --  lo que de verdad importa
+# -----------------------------------------------------------------------------
+
+# Variables de entorno
 .env
-.env.local
-.env.*.local
+.env.*
+*.env
+!.env.example
+!.env.template
 
-# Entorno virtual de Python
-venv/
-.venv/
-env/
-ENV/
+# e.firma (FIEL) y CSD del SAT.
+# La e.firma es la identidad legal de Monsort ante el SAT.
+# Ideal: que estos archivos ni siquiera vivan dentro del repo.
+*.cer
+*.key
+*.pfx
+*.p12
+*.pem
+*.crt
+*.der
+certificados/
+certs/
+fiel/
+efirma/
+csd/
+sat_credenciales/
 
-# Cache de Python
+# Gmail API / OAuth2
+credentials.json
+client_secret*.json
+token.json
+token.pickle
+*.token
+gmail_token*
+historyid*
+history_id*
+
+# Llaves varias
+*.ppk
+id_rsa
+id_rsa.*
+*.jks
+*.keystore
+secrets.json
+secretos.json
+config.local.*
+
+
+# -----------------------------------------------------------------------------
+# 2. DATOS FISCALES Y DE CLIENTES
+# Los CFDI traen RFC, razon social y domicilio de los 30 clientes.
+# Son datos personales: no van a un repo, ni siquiera privado.
+# -----------------------------------------------------------------------------
+
+# Descargas del SAT (descarga masiva devuelve ZIPs con XMLs)
+descargas/
+descargas_sat/
+paquetes/
+paquetes_sat/
+cfdi/
+xmls/
+comprobantes/
+
+# Adjuntos procesados desde Gmail
+adjuntos/
+attachments/
+correos/
+temp_adjuntos/
+
+# Ordenes de compra y reportes generados
+ordenes_compra/
+reportes/
+reportes_generados/
+salidas/
+output/
+outputs/
+
+# Archivos sueltos con datos reales
+*.xml
+*.pdf
+*.zip
+*.rar
+*.7z
+
+# Excel de la migracion historica y sus derivados
+*.xlsx
+*.xlsm
+*.xls
+*.csv
+*.tsv
+
+# Respaldos de base de datos
+*.sql
+*.dump
+*.bak
+*.sqlite
+*.sqlite3
+*.db
+backups/
+respaldos/
+
+# Excepciones: plantillas y ejemplos SIN datos reales
+!ejemplos/**/*.xml
+!ejemplos/**/*.pdf
+!plantillas/**/*.xlsx
+!docs/**/*.pdf
+!tests/fixtures/**/*.xml
+!tests/fixtures/**/*.csv
+
+
+# -----------------------------------------------------------------------------
+# 3. PYTHON / BACKEND
+# -----------------------------------------------------------------------------
+
 __pycache__/
 *.py[cod]
 *$py.class
 *.so
+.Python
 
-# IDEs
-.vscode/
+# Entornos virtuales
+venv/
+.venv/
+env/
+ENV/
+virtualenv/
+
+# Empaquetado
+build/
+dist/
+*.egg-info/
+*.egg
+.eggs/
+develop-eggs/
+sdist/
+wheels/
+pip-wheel-metadata/
+
+# Pruebas y cobertura
+.pytest_cache/
+.coverage
+.coverage.*
+htmlcov/
+.tox/
+.nox/
+.hypothesis/
+coverage.xml
+
+# Herramientas
+.mypy_cache/
+.ruff_cache/
+.dmypy.json
+.ipynb_checkpoints/
+
+# IMPORTANTE: alembic/versions/ SI se versiona.
+# Las migraciones son codigo, no artefactos. No las ignores.
+# Solo se ignora el .ini si contiene la cadena de conexion:
+# alembic.ini
+
+
+# -----------------------------------------------------------------------------
+# 4. FRONTEND (React + TypeScript + Vite)
+# -----------------------------------------------------------------------------
+
+node_modules/
+Frontend/node_modules/
+.pnp
+.pnp.js
+
+Frontend/dist/
+Frontend/dist-ssr/
+Frontend/build/
+.vite/
+*.local
+
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+.eslintcache
+
+
+# -----------------------------------------------------------------------------
+# 5. LOGS Y TEMPORALES
+# -----------------------------------------------------------------------------
+
+*.log
+logs/
+log/
+tmp/
+temp/
+.tmp/
+*.tmp
+*.temp
+*.pid
+*.seed
+
+
+# -----------------------------------------------------------------------------
+# 6. WINDOWS / EDITORES
+# -----------------------------------------------------------------------------
+
+# Windows
+Thumbs.db
+Thumbs.db:encryptable
+ehthumbs.db
+Desktop.ini
+desktop.ini
+$RECYCLE.BIN/
+*.lnk
+
+# macOS (por si Alexandergg trabaja en Mac)
+.DS_Store
+.AppleDouble
+._*
+
+# VS Code
+.vscode/*
+!.vscode/settings.json
+!.vscode/extensions.json
+
+# PyCharm / JetBrains
 .idea/
+*.iml
+*.iws
+
+# Otros
 *.swp
 *.swo
-*.sublime-project
-*.sublime-workspace
+*~
+.history/
 
-# Sistema operativo
-.DS_Store
-Thumbs.db
 
-# Base de datos local
-*.db
-*.sqlite
+# -----------------------------------------------------------------------------
+# 7. DESPLIEGUE
+# -----------------------------------------------------------------------------
 
-# Logs
-*.log
-
-# Archivos de configuración
-.mypy_cache/
-.pytest_cache/
-
-# 
-obtener_refresh_token.py
-
-*.xlsx
-revision*.csv
-correcciones_*.csv
-
-credentials.json
-node_modules
+docker-compose.override.yml
+.docker/
+*.tfstate
+*.tfstate.*
+.terraform/
+ngrok.yml
+ngrok.exe

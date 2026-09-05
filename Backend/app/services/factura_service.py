@@ -389,13 +389,13 @@ def procesar_factura(xml_bytes, mensaje_id, db, usuario_sistema, indice_pdfs) ->
     else:
         estado = obtener_estado(db, "Requiere captura manual")
 
-    cliente_obj = resolver_cliente(db, datos_xml['rfc'], datos_xml['cliente'])
+    cliente_obj = resolver_cliente(db, datos_xml['rfc'], datos_xml['nombre_receptor'])
 
     nueva_factura = Facturas(
         folio_fiscal=uuid_factura,
         folio_interno=datos_xml['folio_interno'],
         rfc=datos_xml['rfc'],
-        cliente=datos_xml['cliente'],
+        cliente=datos_xml['nombre_receptor'],
         fecha=datetime.fromisoformat(datos_xml['fecha']).date(),
         subtotal=float(datos_xml['subtotal']) if datos_xml['subtotal'] else None,
         iva=float(datos_xml['iva']) if datos_xml['iva'] else None,
@@ -899,3 +899,4 @@ def procesar_correos_nuevos(db):
         ).first()
         id_guardado.valor = nuevo_history_id
         db.commit()
+

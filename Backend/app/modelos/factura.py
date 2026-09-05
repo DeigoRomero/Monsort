@@ -1,5 +1,5 @@
 from ..BaseDeDatos import Base
-from sqlalchemy import Column, Integer, String, Date, DECIMAL, ForeignKey, LargeBinary, Boolean, text
+from sqlalchemy import Column, Integer, String, Date, DECIMAL, ForeignKey, LargeBinary, Boolean, text, DateTime
 from sqlalchemy.orm import relationship
 
 
@@ -27,6 +27,19 @@ class Facturas(Base):
     numero_oc_detectado = Column(String, nullable=True)       # raw del parser
     origen = Column(String(20), nullable=False, server_default="gmail")
     tipo_cambio_fuente = Column(String(20), nullable=True)
+    # --- Espejo del webservice de consulta de estatus del SAT ---
+    # Reflejan la ultima respuesta del SAT, no son estado de negocio.
+    # Solo se escriben cuando sat_codigo_estatus empieza con "S".
+    sat_estado = Column(String(20), nullable=True)
+    sat_es_cancelable = Column(String(50), nullable=True)
+    sat_estatus_cancelacion = Column(String(50), nullable=True)
+    sat_codigo_estatus = Column(String(100), nullable=True)
+    sat_validacion_efos = Column(String(10), nullable=True)
+
+    fecha_ultima_verificacion_sat = Column(DateTime(timezone=True), nullable=True)
+    intentos_verificacion_fallidos = Column(
+        Integer, nullable=False, server_default="0", default=0
+    )
 
 
     # Foreign keys

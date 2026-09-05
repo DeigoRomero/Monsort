@@ -155,3 +155,17 @@ class FacturaListadoConResumen(BaseModel):
     pagina: int
     por_pagina: int
     total_paginas: int
+
+class RespuestaVerificacionSat(BaseModel):
+    id_factura: int
+    folio_fiscal: str
+    resultado: str  # concluyente_con_cambio | concluyente_sin_cambio | fallo_verificacion
+    cambio_aplicado: bool
+    id_estado_anterior: int
+    id_estado_actual: int
+    sat_estado: str | None = None
+    sat_es_cancelable: str | None = None
+    sat_estatus_cancelacion: str | None = None
+    sat_codigo_estatus: str | None = None
+    sat_validacion_efos: str | None = None
+    fecha_verificacion: datetime | None = None

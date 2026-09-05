@@ -9,11 +9,9 @@ from app.modelos import usuario, factura, estados
 from fastapi.middleware.cors import CORSMiddleware
 from app.core.scheduler import scheduler
 from contextlib import asynccontextmanager
+from app.core.config import Settings
 
-origenes = [
-    "https://*.ngrok.io",
-    "http://localhost:5173"
-]
+origenes = [o.strip() for o in Settings().CORS_ORIGINS.split(",") if o.strip()]
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -26,10 +24,7 @@ aplicacion = FastAPI(lifespan=lifespan)
 
 aplicacion.add_middleware(
     CORSMiddleware,
-    allow_origins=[
-        "http://localhost:5173",
-        "http://127.0.0.1:5173",
-    ],
+    allow_origins=origenes,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],

@@ -9,6 +9,10 @@ class Settings(BaseSettings):
     GMAIL_CLIENT_SECRET: str
     GMAIL_REFRESH_TOKEN: str
     banxico_token: str | None = None
-    model_config = SettingsConfigDict(env_file=".env")
+    SAT_CER_PATH: str | None = None
+    SAT_KEY_PATH: str | None = None
+    SAT_KEY_PASSWORD: str | None = None
+    CORS_ORIGINS: str = "http://localhost:5173,http://127.0.0.1:5173"
+    model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 
 settings = Settings()

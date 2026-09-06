@@ -221,3 +221,28 @@ export function descargarReporteDetalle(idFactura: number) {
     `reporte_factura_${idFactura}.pdf`
   );
 }
+export interface VerificacionSat {
+  id_factura: number;
+  folio_fiscal: string;
+  resultado: string;
+  cambio_aplicado: boolean;
+  id_estado_anterior: number;
+  id_estado_actual: number;
+  sat_estado: string;
+  sat_es_cancelable: string;
+  sat_estatus_cancelacion: string;
+  sat_codigo_estatus: string;
+  sat_validacion_efos: string;
+  fecha_verificacion: string;
+}
+
+export function verificarSat(idFactura: number): Promise<VerificacionSat> {
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), 40000);
+
+  return apiFetch<VerificacionSat>(`/facturas/${idFactura}/verificar-sat`, {
+    method: "POST",
+    signal: controller.signal,
+  }).finally(() => clearTimeout(timeoutId));
+}
+

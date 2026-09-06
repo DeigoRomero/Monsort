@@ -517,3 +517,41 @@
 .facturas-checkbox-inline {
   margin-bottom: 8px;
 }
+
+.factura-detalle-sat {
+  padding: 0 24px 20px;
+}
+
+.factura-sat-resultado {
+  margin-top: 14px;
+  background: var(--paper);
+  border-radius: 8px;
+  padding: 14px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.factura-sat-fila {
+  display: flex;
+  justify-content: space-between;
+  font-size: 13px;
+}
+
+.factura-sat-etiqueta {
+  color: var(--text-muted);
+}
+
+.factura-sat-valor {
+  color: var(--text-ink);
+  font-weight: 500;
+}
+
+.factura-sat-nota {
+  margin: 6px 0 0;
+  font-size: 12.5px;
+  color: #8a6d1f;
+  background: #fdf1de;
+  padding: 8px 10px;
+  border-radius: 6px;
+}

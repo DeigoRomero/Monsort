@@ -7,6 +7,7 @@ import {
   vincularOc,
   actualizarFactura,
   cancelarFactura,
+  verificarSat,
   urlPdfFactura,
   descargarReporteGeneral,
   descargarReporteDetalle,
@@ -16,6 +17,7 @@ import {
   type FiltrosFacturas,
   type ResumenFacturas,
   type EstadoOpcion,
+  type VerificacionSat,
 } from "../api/facturas";
 import { ApiError } from "../api/client";
 import { CancelarModal } from "../Components/CancelarModal";
@@ -408,6 +410,9 @@ function FacturaDetalleView({
   const [descargando, setDescargando] = useState(false);
   const [mostrarCancelar, setMostrarCancelar] = useState(false);
   const [guardadoOk, setGuardadoOk] = useState(false);
+  const [verificandoSat, setVerificandoSat] = useState(false);
+  const [resultadoSat, setResultadoSat] = useState<VerificacionSat | null>(null);
+  const [errorSat, setErrorSat] = useState<string | null>(null);
 
   const [numeroOc, setNumeroOc] = useState("");
   const [folioInterno, setFolioInterno] = useState("");
@@ -481,6 +486,32 @@ function FacturaDetalleView({
       );
     } finally {
       setIsSaving(false);
+    }
+  }
+
+  async function handleVerificarSat() {
+    if (!factura) return;
+    setVerificandoSat(true);
+    setErrorSat(null);
+    setResultadoSat(null);
+    try {
+      const resultado = await verificarSat(factura.id_factura);
+      setResultadoSat(resultado);
+      if (resultado.cambio_aplicado) {
+        cargarFactura();
+      }
+    } catch (err) {
+      if (err instanceof DOMException && err.name === "AbortError") {
+        setErrorSat(
+          "La verificación tardó demasiado. El SAT puede haber completado el cambio de todas formas — revisa la factura en unos momentos."
+        );
+      } else {
+        setErrorSat(
+          err instanceof ApiError ? err.message : "No se pudo verificar ante el SAT."
+        );
+      }
+    } finally {
+      setVerificandoSat(false);
     }
   }
 
@@ -716,6 +747,54 @@ function FacturaDetalleView({
           >
             Esta factura no tiene PDF adjunto.
           </p>
+        )}
+      </div>
+
+      <div className="factura-detalle-sat">
+        <label className="factura-detalle-label">Estatus ante el SAT</label>
+        <button
+          className="factura-btn-secondary"
+          onClick={handleVerificarSat}
+          disabled={verificandoSat}
+        >
+          {verificandoSat
+            ? "Consultando al SAT… (puede tardar hasta 30s)"
+            : "Verificar ante SAT"}
+        </button>
+
+        {errorSat && (
+          <p
+            className="facturas-status facturas-status-error"
+            style={{ padding: "10px 0 0" }}
+          >
+            {errorSat}
+          </p>
+        )}
+
+        {resultadoSat && (
+          <div className="factura-sat-resultado">
+            <div className="factura-sat-fila">
+              <span className="factura-sat-etiqueta">Estado SAT</span>
+              <span className="factura-sat-valor">{resultadoSat.sat_estado}</span>
+            </div>
+            <div className="factura-sat-fila">
+              <span className="factura-sat-etiqueta">¿Es cancelable?</span>
+              <span className="factura-sat-valor">
+                {resultadoSat.sat_es_cancelable}
+              </span>
+            </div>
+            <div className="factura-sat-fila">
+              <span className="factura-sat-etiqueta">Estatus de cancelación</span>
+              <span className="factura-sat-valor">
+                {resultadoSat.sat_estatus_cancelacion || "—"}
+              </span>
+            </div>
+            {resultadoSat.cambio_aplicado && (
+              <p className="factura-sat-nota">
+                ⚠️ El estado local se actualizó automáticamente según el SAT.
+              </p>
+            )}
+          </div>
         )}
       </div>
 

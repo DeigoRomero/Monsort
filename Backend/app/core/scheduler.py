@@ -5,7 +5,9 @@ from apscheduler.schedulers.background import BackgroundScheduler
 from app.BaseDeDatos import SessionLocal
 from app.services.factura_service import procesar_correos_nuevos
 from app.services.verificacion_service import verificar_lote
-from app.services.descarga_masiva_service import avanzar_solicitudes
+from app.services.descarga_masiva_service import avanzar_solicitudes, crear_solicitud_ventana_movil
+from app.services.verificacion_recibidas_service import verificar_lote_recibidas
+
 
 logger = logging.getLogger(__name__)
 
@@ -55,6 +57,40 @@ def job_descarga_masiva():
     finally:
         db.close()
 
+def job_barrido_recibidas():
+    """Crea la solicitud diaria de metadata de facturas recibidas."""
+    db = SessionLocal()
+    try:
+        solicitud = crear_solicitud_ventana_movil(db)
+        if solicitud:
+            logger.info("Barrido de recibidas registrado: #%s", solicitud.id)
+    except Exception:
+        logger.exception("Error en el job de barrido de recibidas")
+    finally:
+        db.close()
+
+def job_verificar_recibidas():
+    """Verifica ante el SAT las recibidas fuera de la ventana de metadata."""
+    db = SessionLocal()
+    try:
+        resumen = verificar_lote_recibidas(db, limite=100, aplicar=True)
+        logger.info(
+            "Verificación SAT recibidas: %d consultadas, %d canceladas, %d fallos",
+            resumen["seleccionadas"],
+            resumen["concluyente_con_cambio"],
+            resumen["fallo_verificacion"],
+        )
+        if resumen["canceladas_detectadas"]:
+            logger.warning(
+                "Recibidas canceladas por el SAT: %s",
+                ", ".join(resumen["canceladas_detectadas"]),
+            )
+        if resumen["abortado_por_circuit_breaker"]:
+            logger.error("Verificación de recibidas abortada por circuit breaker")
+    except Exception:
+        logger.exception("Error en el job de verificación de recibidas")
+    finally:
+        db.close()
 
 
 scheduler = BackgroundScheduler()
@@ -86,4 +122,26 @@ scheduler.add_job(
     id="descarga_masiva",
     max_instances=1,
     coalesce=True,
+)
+
+scheduler.add_job(
+    job_barrido_recibidas,
+    "cron",
+    hour=2,
+    minute=0,
+    id="barrido_recibidas",
+    max_instances=1,
+    coalesce=True,
+    misfire_grace_time=3600,
+)
+
+scheduler.add_job(
+    job_verificar_recibidas,
+    "cron",
+    hour=4,
+    minute=30,
+    id="verificar_recibidas",
+    max_instances=1,
+    coalesce=True,
+    misfire_grace_time=3600,
 )

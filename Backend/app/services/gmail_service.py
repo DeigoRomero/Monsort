@@ -10,6 +10,8 @@ import logging
 logger = logging.getLogger(__name__)
 
 def obtener_servicio_gmail(db: Session | None = None):
+    # settings es el valor por defecto; la BD lo sobreescribe si existe.
+    # La BD es la fuente de verdad: /auth/gmail/iniciar escribe ahi.
     refresh_token = settings.GMAIL_REFRESH_TOKEN
 
     if db is not None:
@@ -23,18 +25,23 @@ def obtener_servicio_gmail(db: Session | None = None):
         raise RuntimeError(
             "No hay refresh token de Gmail. Autoriza desde /auth/gmail/iniciar"
         )
+
     creds = Credentials(
-    token=None,
-    client_id=settings.GMAIL_CLIENT_ID, 
-    client_secret=settings.GMAIL_CLIENT_SECRET,  
-    refresh_token=settings.GMAIL_REFRESH_TOKEN,
-    token_uri="https://oauth2.googleapis.com/token"
+        token=None,
+        client_id=settings.GMAIL_CLIENT_ID,
+        client_secret=settings.GMAIL_CLIENT_SECRET,
+        refresh_token=refresh_token,
+        token_uri="https://oauth2.googleapis.com/token",
     )
-    servicio = build('gmail','v1', credentials=creds)
+    servicio = build('gmail', 'v1', credentials=creds)
     return servicio
 
-def obtener_mensajes_nuevos(db: Session):
-    servicio = obtener_servicio_gmail()
+def obtener_mensajes_nuevos(db: Session, servicio=None):
+    # El servicio se recibe ya construido para no hacer un segundo
+    # build() + refresh de token en cada ciclo del scheduler.
+    if servicio is None:
+        servicio = obtener_servicio_gmail(db)
+
     IdGuardado = db.query(Configuracion_sistema).filter(
         Configuracion_sistema.clave == "gmail_history_id"
     ).first()
@@ -193,4 +200,3 @@ def obtener_ultimo_mensaje(servicio):
     if mensajes:
         return mensajes[0]['id']
     return None
-

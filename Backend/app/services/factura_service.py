@@ -1,6 +1,7 @@
 from app.modelos.configuracion import Configuracion_sistema
 from app.services.gmail_service import obtener_servicio_gmail, obtener_ultimo_mensaje, extraer_adjuntos, obtener_mensajes_nuevos
 from app.services.usuario_service import obtener_usuario_sistema, obtener_estado_pendiente
+from google.auth.exceptions import RefreshError
 import hashlib
 import pdfplumber
 import io
@@ -413,6 +414,12 @@ def procesar_factura(xml_bytes, mensaje_id, db, usuario_sistema, indice_pdfs) ->
         id_usuario=usuario_sistema.id_usuario,
         id_estado=estado.id_estado,
         id_cliente=cliente_obj.id if cliente_obj else None,
+        # Se congela el plazo vigente al momento de emitir: si el cliente
+        # renegocia despues, las facturas viejas conservan el suyo.
+        # Queda None si el cliente aun no tiene plazo capturado.
+        dias_plazo_pago_aplicado=(
+            cliente_obj.dias_plazo_pago if cliente_obj else None
+        ),
     )
     db.add(nueva_factura)
 
@@ -433,7 +440,9 @@ def procesar_factura(xml_bytes, mensaje_id, db, usuario_sistema, indice_pdfs) ->
     return True
 
 def resolver_cliente(db, rfc: str, nombre: str) -> Cliente:
-
+    # PENDIENTE: los clientes nuevos nacen sin dias_plazo_pago, asi que su
+    # primera factura queda sin fecha limite hasta que alguien lo capture
+    # en el dashboard. Decidir si conviene un valor por defecto.
     existente = db.query(Cliente).filter(
         Cliente.rfc == rfc,
     ).first()
@@ -875,8 +884,21 @@ def cancelar_cp(db, id_cp: int, motivo: str, id_usuario: int) -> ComplementosPag
 # ---------- SCHEDULER ----------
 
 def procesar_correos_nuevos(db):
-    servicio = obtener_servicio_gmail()
-    ids_mensajes, nuevo_history_id = obtener_mensajes_nuevos(db)
+    try:
+        servicio = obtener_servicio_gmail(db)
+            # Se pasa el servicio ya construido: antes se hacia un segundo build()
+            # + refresh de token en cada ciclo.
+        ids_mensajes, nuevo_history_id = obtener_mensajes_nuevos(db, servicio)
+    except RefreshError as e:
+        logger.error(
+            "Credenciales de Gmail inválidas (%s)."
+            "Reatuoriza en /auth/gmail/iniciar", e
+        )
+        return
+    except RuntimeError as e:
+        logger.error("Gmail no configurado: %s", e)
+        return
+    
     ids_mensajes = list(dict.fromkeys(ids_mensajes))
     usuario_sistema = obtener_usuario_sistema(db)
 
@@ -915,6 +937,8 @@ def procesar_correos_nuevos(db):
         id_guardado = db.query(Configuracion_sistema).filter(
             Configuracion_sistema.clave == "gmail_history_id"
         ).first()
-        id_guardado.valor = nuevo_history_id
-        db.commit()
-
+        # La fila deberia existir siempre que nuevo_history_id venga poblado,
+        # pero la guarda evita un AttributeError si esa invariante cambia.
+        if id_guardado:
+            id_guardado.valor = nuevo_history_id
+            db.commit()

@@ -6,3 +6,6 @@ from app.modelos.orden_compra import OrdenesCompra
 from app.modelos.complemento_pago import ComplementosPago
 from app.modelos.cp_documento_relacionado import CPDocumentosRelacionados
 from app.modelos.correo_procesado import CorreosProcesados, CorreosFallidos
+from app.modelos.cliente import Cliente
+from app.modelos.solicitud_sat import SolicitudesSAT
+from app.modelos.facturas_recibidas import FacturasRecibidas

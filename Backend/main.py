@@ -6,6 +6,7 @@ from app.api.rutas.ordenes_compra import router as OrdenCompraRouter
 from app.api.rutas.reportes import router as ReporteRouter
 from app.api.rutas.clientes import router as ClienteRouter
 from app.api.rutas.auth_gmail import router as AuthGmailRouter
+from app.api.rutas.facturas_recibidas import router as FacturaRecibidaRouter
 from app.modelos import usuario, factura, estados
 from fastapi.middleware.cors import CORSMiddleware
 from app.core.scheduler import scheduler
@@ -39,3 +40,4 @@ aplicacion.include_router(OrdenCompraRouter, prefix="/ordenes-compra", tags=["Or
 aplicacion.include_router(ReporteRouter, prefix="/reportes", tags=["Reportes"])
 aplicacion.include_router(ClienteRouter, prefix="/clientes", tags=["Clientes"])
 aplicacion.include_router(AuthGmailRouter, prefix="/auth", tags=["Autenticación Gmail"])
+aplicacion.include_router(FacturaRecibidaRouter, prefix="/facturas-recibidas", tags=["Facturas recibidas"])

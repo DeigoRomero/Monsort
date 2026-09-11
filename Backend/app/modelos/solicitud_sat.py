@@ -1,5 +1,6 @@
 from ..BaseDeDatos import Base
 from sqlalchemy import Column, Integer, String, Date, DateTime, Text
+from sqlalchemy.orm import relationship
 
 
 class SolicitudesSAT(Base):
@@ -37,3 +38,4 @@ class SolicitudesSAT(Base):
     cfdis_nuevos = Column(Integer, nullable=True)
     cfdis_duplicados = Column(Integer, nullable=True)
     error_ingesta = Column(Text, nullable=True)
+    facturas_recibidas = relationship("FacturasRecibidas", back_populates="solicitud_obj")

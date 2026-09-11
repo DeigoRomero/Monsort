@@ -9,7 +9,8 @@ from datetime import datetime
 from app.BaseDeDatos import get_db
 from app.esquemas.factura import FiltrosFactura
 from app.services.reporte_service import generar_reporte_general, generar_reporte_detalle
-
+from app.esquemas.factura_recibida import FiltrosFacturaRecibida
+from app.services.reporte_recibidas_service import generar_reporte_recibidas
 router = APIRouter()
 
 
@@ -56,6 +57,36 @@ def reporte_detalle(
         raise HTTPException(status_code=500, detail=f"Error generando reporte: {str(e)}")
 
     nombre = f"factura_{id_factura}_detalle_{datetime.now().strftime('%Y%m%d_%H%M')}.pdf"
+    return Response(
+        content=pdf_bytes,
+        media_type="application/pdf",
+        headers={"Content-Disposition": f'attachment; filename="{nombre}"'},
+    )
+
+@router.get("/recibidas", tags=["Reportes"])
+def reporte_recibidas(
+    filtros: FiltrosFacturaRecibida = Depends(),
+    db: Session = Depends(get_db),
+):
+    """
+    Reporte de CFDI recibidos (proveedores), agrupado por proveedor.
+ 
+    Acepta los mismos query params que GET /facturas-recibidas/:
+      q, rfc_emisor, nombre_emisor, sat_estado, solo_facturas,
+      efecto_comprobante, fecha_desde, fecha_hasta, monto_min, monto_max
+ 
+    La paginacion se ignora: el reporte incluye todo el conjunto filtrado.
+ 
+    Las canceladas aparecen marcadas en rojo pero NO suman a los totales.
+    """
+    try:
+        pdf_bytes = generar_reporte_recibidas(db, filtros)
+    except Exception as e:
+        raise HTTPException(
+            status_code=500, detail=f"Error generando reporte: {str(e)}"
+        )
+ 
+    nombre = f"reporte_recibidas_{datetime.now().strftime('%Y%m%d_%H%M')}.pdf"
     return Response(
         content=pdf_bytes,
         media_type="application/pdf",

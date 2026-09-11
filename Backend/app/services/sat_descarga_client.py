@@ -15,6 +15,15 @@ El servicio del SAT es ASINCRONO y tiene cuatro operaciones:
   3. verificar_solicitud() -> estado; hay que insistir hasta que este lista
   4. descargar_paquete()   -> ZIP con los XML
 
+Dos ejes independientes en una solicitud:
+
+  tipo_solicitud    metadata | cfdi        -> QUE formato se descarga
+  tipo_comprobante  emitidos | recibidos   -> de QUIEN son los comprobantes
+
+Para el SAT son operaciones distintas (SolicitaDescargaEmitidos vs
+SolicitaDescargaRecibidos). Aqui se modela como parametro porque el
+orquestador es el mismo.
+
 Notas de realidad que el falso reproduce a proposito:
 
   - Verificar devuelve EN_PROCESO varias veces antes de LISTA. El tiempo
@@ -25,11 +34,10 @@ Notas de realidad que el falso reproduce a proposito:
   - Codigo 5005: ya existe una solicitud identica en curso.
   - Una solicitud puede terminar sin CFDI (rango vacio). No es un error.
 
-Ubicacion sugerida: app/services/sat_descarga_client.py
 """
 
 from __future__ import annotations
-
+import uuid as _uuid
 import io
 import random
 import zipfile
@@ -76,6 +84,11 @@ MENSAJE_CODIGO = {
 TIPO_METADATA = "metadata"
 TIPO_CFDI = "cfdi"
 
+# Coinciden con el server_default de SolicitudesSAT.tipo_comprobante.
+# Plural masculino: "emitidos"/"recibidos", nunca "recibidas".
+COMPROBANTE_EMITIDOS = "emitidos"
+COMPROBANTE_RECIBIDOS = "recibidos"
+
 # Un paquete trae hasta 10,000 comprobantes.
 CFDIS_POR_PAQUETE = 10_000
 
@@ -86,7 +99,7 @@ CFDIS_POR_PAQUETE = 10_000
 
 @dataclass(frozen=True)
 class RespuestaSolicitud:
-    """Resultado de SolicitaDescargaEmitidos."""
+    """Resultado de SolicitaDescargaEmitidos / SolicitaDescargaRecibidos."""
     exitoso: bool
     id_solicitud: str | None = None
     codigo_estatus: str | None = None
@@ -150,6 +163,7 @@ class ClienteSAT(Protocol):
         fecha_inicial: date,
         fecha_final: date,
         tipo_solicitud: str = TIPO_METADATA,
+        tipo_comprobante: str = COMPROBANTE_EMITIDOS,
     ) -> RespuestaSolicitud:
         ...
 
@@ -172,6 +186,9 @@ class ClienteSATFalso:
     simulara el exito, no estariamos probando la maquina de estados sino
     un if.
 
+    IMPORTANTE: mantiene estado en memoria (solicitudes en curso, token).
+    Se instancia UNA vez por ciclo completo, no una por paso.
+
     Parametros de control:
         verificaciones_antes_de_lista  cuantos polls devuelven EN_PROCESO
         cfdis_por_solicitud            cuantos comprobantes simular
@@ -179,6 +196,19 @@ class ClienteSATFalso:
                                        (CODIGO_CUOTA_AGOTADA, etc.)
         semilla                        para que las corridas sean repetibles
     """
+
+    # Proveedores ficticios para las recibidas. Varios, para que el
+    # endpoint de /emisores y el indice compuesto tengan algo que agrupar.
+    PROVEEDORES = [
+        ("AAA010101AAA", "SUMINISTROS INDUSTRIALES DEL NORTE SA DE CV"),
+        ("BBB020202BB1", "TRANSPORTES Y LOGISTICA BAJA SA DE CV"),
+        ("CCC030303CC2", "PAPELERIA Y EQUIPO DE OFICINA SA DE CV"),
+        ("DDD040404DD3", "SERVICIOS PROFESIONALES TIJUANA SC"),
+    ]
+
+    # Mezcla realista: facturas, alguna nota de credito, algun complemento.
+    # Sirve para probar que el endpoint filtre a "I" por defecto.
+    EFECTOS = ["I", "I", "I", "I", "I", "I", "I", "E", "P", "P"]
 
     def __init__(
         self,
@@ -219,12 +249,20 @@ class ClienteSATFalso:
         fecha_inicial: date,
         fecha_final: date,
         tipo_solicitud: str = TIPO_METADATA,
+        tipo_comprobante: str = COMPROBANTE_EMITIDOS,
     ) -> RespuestaSolicitud:
         if fecha_inicial > fecha_final:
             return RespuestaSolicitud(
                 exitoso=False,
                 codigo_estatus="5001",
                 mensaje="La fecha inicial no puede ser mayor a la final",
+            )
+
+        if tipo_comprobante not in (COMPROBANTE_EMITIDOS, COMPROBANTE_RECIBIDOS):
+            return RespuestaSolicitud(
+                exitoso=False,
+                codigo_estatus="5001",
+                mensaje=f"tipo_comprobante invalido: {tipo_comprobante!r}",
             )
 
         if self.forzar_codigo:
@@ -234,8 +272,10 @@ class ClienteSATFalso:
                 mensaje=MENSAJE_CODIGO.get(self.forzar_codigo, "Error simulado"),
             )
 
-        # Duplicada: mismo rango y tipo aun en curso.
-        clave = (fecha_inicial, fecha_final, tipo_solicitud)
+        # Duplicada: mismo rango, tipo y orientacion aun en curso.
+        # tipo_comprobante entra en la clave: pedir emitidos y recibidos
+        # del mismo rango son solicitudes distintas, no una duplicada.
+        clave = (fecha_inicial, fecha_final, tipo_solicitud, tipo_comprobante)
         for datos in self._solicitudes.values():
             if datos["clave"] == clave and datos["estado"] != ESTADO_TERMINADA:
                 return RespuestaSolicitud(
@@ -245,11 +285,12 @@ class ClienteSATFalso:
                 )
 
         self._contador += 1
-        id_solicitud = f"fa1b2c3d-0000-0000-0000-{self._contador:012d}"
+        id_solicitud = f"fa1b2c3d-0000-0000-0000-{_uuid.uuid4().int % 10**12:012d}"
 
         self._solicitudes[id_solicitud] = {
             "clave": clave,
             "tipo": tipo_solicitud,
+            "comprobante": tipo_comprobante,
             "estado": ESTADO_ACEPTADA,
             "verificaciones": 0,
             "cfdis": self.cfdis_por_solicitud,
@@ -329,7 +370,7 @@ class ClienteSATFalso:
             )
 
         if datos["tipo"] == TIPO_METADATA:
-            contenido = self._zip_metadata(datos["cfdis"])
+            contenido = self._zip_metadata(datos["cfdis"], datos["comprobante"])
         else:
             contenido = self._zip_cfdi(datos["cfdis"])
 
@@ -346,10 +387,18 @@ class ClienteSATFalso:
         base = f"{indice:032x}".upper()
         return f"{base[:8]}-{base[8:12]}-{base[12:16]}-{base[16:20]}-{base[20:32]}"
 
-    def _zip_metadata(self, cuantos: int) -> bytes:
+    def _zip_metadata(
+        self,
+        cuantos: int,
+        tipo_comprobante: str = COMPROBANTE_EMITIDOS,
+    ) -> bytes:
         """
         El paquete de metadata trae un unico .txt delimitado por '~',
         con encabezado. Es texto, no XML.
+
+        La orientacion invierte emisor y receptor:
+          emitidos   Monsort emite  -> RfcEmisor = Monsort
+          recibidos  un proveedor le emite a Monsort -> RfcReceptor = Monsort
         """
         columnas = [
             "Uuid", "RfcEmisor", "NombreEmisor", "RfcReceptor", "NombreReceptor",
@@ -358,19 +407,37 @@ class ClienteSATFalso:
         ]
         lineas = ["~".join(columnas)]
 
+        es_recibidos = tipo_comprobante == COMPROBANTE_RECIBIDOS
+
         for indice in range(1, cuantos + 1):
             cancelado = indice % 10 == 0
+
+            if es_recibidos:
+                rfc_prov, nombre_prov = self.PROVEEDORES[
+                    indice % len(self.PROVEEDORES)
+                ]
+                rfc_emisor, nombre_emisor = rfc_prov, nombre_prov
+                rfc_receptor = self.rfc
+                nombre_receptor = "MONSORT SIN FRONTERAS SA DE CV"
+                efecto = self.EFECTOS[indice % len(self.EFECTOS)]
+            else:
+                rfc_emisor = self.rfc
+                nombre_emisor = "MONSORT SIN FRONTERAS SA DE CV"
+                rfc_receptor = "PIN040713FL9"
+                nombre_receptor = "CLIENTE DE PRUEBA SA DE CV"
+                efecto = "I"
+
             lineas.append("~".join([
                 self._uuid_falso(indice),
-                self.rfc,
-                "MONSORT SIN FRONTERAS SA DE CV",
-                "PIN040713FL9",
-                "CLIENTE DE PRUEBA SA DE CV",
+                rfc_emisor,
+                nombre_emisor,
+                rfc_receptor,
+                nombre_receptor,
                 "PPD101129EA3",
                 f"2026-0{(indice % 9) + 1}-15T10:00:00",
                 f"2026-0{(indice % 9) + 1}-15T10:05:00",
                 f"{1000 + indice * 37}.00",
-                "I",
+                efecto,
                 "0" if cancelado else "1",
                 "2026-08-01T00:00:00" if cancelado else "",
             ]))
@@ -449,7 +516,7 @@ def _demostracion() -> None:
 
     inicio, fin = date(2026, 1, 1), date(2026, 1, 31)
     solicitud = cliente.solicitar_descarga(inicio, fin, TIPO_METADATA)
-    print(f"\n2. solicitar_descarga({inicio}, {fin}, metadata)")
+    print(f"\n2. solicitar_descarga({inicio}, {fin}, metadata, emitidos)")
     print(f"   exitoso      = {solicitud.exitoso}")
     print(f"   id_solicitud = {solicitud.id_solicitud}")
     print(f"   codigo       = {solicitud.codigo_estatus} - {solicitud.mensaje}")
@@ -475,13 +542,41 @@ def _demostracion() -> None:
                 for linea in contenido.splitlines()[:3]:
                     print(f"         {linea[:100]}")
 
-    print("\n5. Casos de error")
+    # -------- recibidos: misma maquinaria, orientacion invertida --------
+    print("\n5. Mismo ciclo con tipo_comprobante='recibidos'")
+    sol_rec = cliente.solicitar_descarga(
+        inicio, fin, TIPO_METADATA, COMPROBANTE_RECIBIDOS
+    )
+    print(f"   id_solicitud = {sol_rec.id_solicitud} "
+          f"({sol_rec.codigo_estatus} - {sol_rec.mensaje})")
+
+    for _ in range(5):
+        ver_rec = cliente.verificar_solicitud(sol_rec.id_solicitud)
+        if ver_rec.esta_lista:
+            break
+
+    for id_paquete in ver_rec.paquetes:
+        paquete = cliente.descargar_paquete(id_paquete)
+        with zipfile.ZipFile(io.BytesIO(paquete.contenido)) as archivo:
+            for nombre in archivo.namelist():
+                contenido = archivo.read(nombre).decode("utf-8")
+                for linea in contenido.splitlines()[:4]:
+                    print(f"      {linea[:110]}")
+
+    print("\n6. Casos de error")
     # Duplicada: dos solicitudes identicas sin que la primera termine.
     otro = ClienteSATFalso()
     otro.solicitar_descarga(inicio, fin, TIPO_METADATA)
     duplicada = otro.solicitar_descarga(inicio, fin, TIPO_METADATA)
     print(f"   solicitud duplicada:  {duplicada.codigo_estatus} - "
           f"{duplicada.mensaje}")
+
+    # Mismo rango pero otra orientacion: NO es duplicada.
+    no_duplicada = otro.solicitar_descarga(
+        inicio, fin, TIPO_METADATA, COMPROBANTE_RECIBIDOS
+    )
+    print(f"   emitidos vs recibidos: exitoso={no_duplicada.exitoso} "
+          f"({no_duplicada.codigo_estatus})")
 
     agotado = ClienteSATFalso(forzar_codigo=CODIGO_CUOTA_AGOTADA)
     respuesta = agotado.solicitar_descarga(inicio, fin, TIPO_CFDI)

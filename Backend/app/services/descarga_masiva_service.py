@@ -47,6 +47,8 @@ from app.services.sat_descarga_client import (
     CODIGO_TOPE_MAXIMO,
     TIPO_CFDI,
     TIPO_METADATA,
+    COMPROBANTE_EMITIDOS,
+    COMPROBANTE_RECIBIDOS,
     ClienteSAT,
     ClienteSATFalso,
 )
@@ -128,6 +130,7 @@ def crear_solicitud(
     fecha_inicial: date,
     fecha_final: date,
     tipo_solicitud: str = TIPO_METADATA,
+    tipo_comprobante: str = COMPROBANTE_EMITIDOS,
 ) -> object:
     """
     Registra una solicitud en estado NUEVA. No habla con el SAT todavia:
@@ -141,6 +144,7 @@ def crear_solicitud(
             SolicitudesSAT.fecha_inicial == fecha_inicial,
             SolicitudesSAT.fecha_final == fecha_final,
             SolicitudesSAT.tipo_solicitud == tipo_solicitud,
+            SolicitudesSAT.tipo_comprobante == tipo_comprobante,
             SolicitudesSAT.estado.in_(ESTADOS_ACTIVOS),
         )
         .first()
@@ -159,7 +163,7 @@ def crear_solicitud(
         fecha_inicial=fecha_inicial,
         fecha_final=fecha_final,
         tipo_solicitud=tipo_solicitud,
-        tipo_comprobante="emitidos",
+        tipo_comprobante=tipo_comprobante,
         estado=NUEVA,
         intentos_verificacion=0,
         fecha_creacion=_ahora(),
@@ -173,11 +177,80 @@ def crear_solicitud(
     )
     return solicitud
 
+# Ventana movil del barrido diario. 90 dias cubre practicamente todas
+# las cancelaciones: casi todas ocurren en los primeros meses. Subirlo
+# da mas cobertura a cambio de paquetes mas grandes; bajarlo arriesga
+# perder cancelaciones tardias, que el SOAP del paso 9 tendria que
+# alcanzar en lotes mucho mas lentos.
+DIAS_VENTANA_MOVIL = 90
+
+
+def crear_solicitud_ventana_movil(
+    db: Session,
+    dias: int = DIAS_VENTANA_MOVIL,
+) -> object | None:
+    """
+    Crea la solicitud diaria de recibidas sobre una ventana movil.
+
+    La metadata trae el Estatus ACTUAL, no el del momento de emision:
+    volver a descargar un rango ya ingerido refresca las cancelaciones
+    de miles de facturas con una sola solicitud. La ingesta es
+    idempotente, asi que el traslape no duplica nada.
+
+    Devuelve None si no habia nada que hacer.
+    """
+    from app.modelos.solicitud_sat import SolicitudesSAT
+
+    # 1. No apilar. Una solicitud puede tardar horas; si la de ayer sigue
+    #    en curso, crear otra solo gasta cuota diaria del RFC.
+    activa = (
+        db.query(SolicitudesSAT)
+        .filter(
+            SolicitudesSAT.tipo_comprobante == COMPROBANTE_RECIBIDOS,
+            SolicitudesSAT.estado.in_(ESTADOS_ACTIVOS),
+        )
+        .first()
+    )
+    if activa:
+        logger.info(
+            "Barrido diario omitido: la solicitud #%s sigue en %s",
+            activa.id, activa.estado,
+        )
+        return None
+
+    # 2. Una por dia. Protege contra un reinicio del proceso o un
+    #    misfire de APScheduler que dispare el job dos veces.
+    inicio_de_hoy = _ahora().replace(hour=0, minute=0, second=0, microsecond=0)
+    ya_hubo = (
+        db.query(SolicitudesSAT)
+        .filter(
+            SolicitudesSAT.tipo_comprobante == COMPROBANTE_RECIBIDOS,
+            SolicitudesSAT.fecha_creacion >= inicio_de_hoy,
+        )
+        .first()
+    )
+    if ya_hubo:
+        logger.info("Barrido diario ya ejecutado hoy (solicitud #%s)", ya_hubo.id)
+        return None
+
+    fecha_final = date.today()
+    fecha_inicial = fecha_final - timedelta(days=dias)
+
+    solicitud = crear_solicitud(
+        db, fecha_inicial, fecha_final, TIPO_METADATA, COMPROBANTE_RECIBIDOS
+    )
+    logger.info(
+        "Barrido diario de recibidas: %s a %s (solicitud #%s)",
+        fecha_inicial, fecha_final, solicitud.id,
+    )
+    return solicitud
+
 
 def crear_solicitudes_por_mes(
     db: Session,
     anio: int,
     tipo_solicitud: str = TIPO_METADATA,
+    tipo_comprobante: str = COMPROBANTE_EMITIDOS
 ) -> list:
     """
     Parte un anio en solicitudes mensuales.
@@ -190,7 +263,7 @@ def crear_solicitudes_por_mes(
         inicio = date(anio, mes, 1)
         fin = (date(anio + 1, 1, 1) if mes == 12 else date(anio, mes + 1, 1))
         fin = fin - timedelta(days=1)
-        creadas.append(crear_solicitud(db, inicio, fin, tipo_solicitud))
+        creadas.append(crear_solicitud(db, inicio, fin, tipo_solicitud, tipo_comprobante))
     return creadas
 
 
@@ -203,6 +276,7 @@ def _paso_solicitar(db: Session, solicitud, cliente: ClienteSAT) -> str:
         solicitud.fecha_inicial,
         solicitud.fecha_final,
         solicitud.tipo_solicitud,
+        solicitud.tipo_comprobante,
     )
 
     solicitud.codigo_estatus = respuesta.codigo_estatus
@@ -318,7 +392,20 @@ def _paso_descargar(db: Session, solicitud, cliente: ClienteSAT) -> str:
         return FALLIDA
 
     try:
-        if solicitud.tipo_solicitud == TIPO_METADATA:
+        if solicitud.tipo_comprobante == COMPROBANTE_RECIBIDOS:
+            from app.services.ingesta_recibidas_service import (
+                ingerir_metadata_recibidas,
+            )
+            if solicitud.tipo_solicitud != TIPO_METADATA:
+                raise ValueError(
+                    "Las recibidas solo se soportan con tipo_solicitud=metadata"
+                )
+            nuevos, duplicados, rechazos = ingerir_metadata_recibidas(
+                db, respuesta.contenido, solicitud.id
+            )
+            if rechazos:
+                solicitud.error_ingesta = rechazos
+        elif solicitud.tipo_solicitud == TIPO_METADATA:
             nuevos, duplicados = ingerir_metadata(db, respuesta.contenido)
         else:
             nuevos, duplicados = ingerir_cfdi(db, respuesta.contenido)
@@ -574,6 +661,9 @@ def main() -> None:
     parser.add_argument("--crear-anio", type=int, help="Crear 12 solicitudes")
     parser.add_argument("--tipo", default=TIPO_METADATA,
                         choices=[TIPO_METADATA, TIPO_CFDI])
+    parser.add_argument("--comprobante", default=COMPROBANTE_EMITIDOS,
+                        choices=[COMPROBANTE_EMITIDOS, COMPROBANTE_RECIBIDOS],
+                        help="De quien son los comprobantes")
     parser.add_argument("--avanzar", action="store_true",
                         help="Avanzar un paso las solicitudes activas")
     parser.add_argument("--ciclo", type=int, metavar="N",
@@ -581,10 +671,10 @@ def main() -> None:
     parser.add_argument("--listar", action="store_true")
     args = parser.parse_args()
 
-    from app.modelos import (  # noqa: F401
+    from app.modelos import (
         usuario, factura, estados, configuracion, conceptos,
         complemento_pago, orden_compra, cp_documento_relacionado,
-        correo_procesado, cliente, solicitud_sat,
+        correo_procesado, cliente, solicitud_sat, facturas_recibidas,
     )
     from app.BaseDeDatos import SessionLocal
     from app.modelos.solicitud_sat import SolicitudesSAT
@@ -595,10 +685,12 @@ def main() -> None:
             anio, mes = map(int, args.crear_mes.split("-"))
             inicio = date(anio, mes, 1)
             fin = (date(anio + 1, 1, 1) if mes == 12 else date(anio, mes + 1, 1))
-            crear_solicitud(db, inicio, fin - timedelta(days=1), args.tipo)
+            crear_solicitud(db, inicio, fin - timedelta(days=1),
+                            args.tipo, args.comprobante)
 
         if args.crear_anio:
-            crear_solicitudes_por_mes(db, args.crear_anio, args.tipo)
+            crear_solicitudes_por_mes(db, args.crear_anio,
+                                      args.tipo, args.comprobante)
 
         if args.avanzar or args.ciclo:
             vueltas = args.ciclo or 1
@@ -616,15 +708,15 @@ def main() -> None:
                     break
 
         if args.listar or args.avanzar or args.ciclo:
-            print("\n" + "=" * 78)
-            print(f"{'ID':<5}{'RANGO':<26}{'TIPO':<10}{'ESTADO':<14}"
-                  f"{'CFDIS':>7}{'NUEVOS':>8}")
-            print("=" * 78)
+            print("\n" + "=" * 89)
+            print(f"{'ID':<5}{'RANGO':<26}{'TIPO':<10}{'COMPROB':<11}"
+                  f"{'ESTADO':<14}{'CFDIS':>7}{'NUEVOS':>8}")
+            print("=" * 89)
             for s in db.query(SolicitudesSAT).order_by(SolicitudesSAT.id).all():
                 rango = f"{s.fecha_inicial} a {s.fecha_final}"
                 print(f"{s.id:<5}{rango:<26}{s.tipo_solicitud:<10}"
-                      f"{s.estado:<14}{s.numero_cfdis or 0:>7}"
-                      f"{s.cfdis_nuevos or 0:>8}")
+                      f"{s.tipo_comprobante:<11}{s.estado:<14}"
+                      f"{s.numero_cfdis or 0:>7}{s.cfdis_nuevos or 0:>8}")
             print()
     finally:
         db.close()

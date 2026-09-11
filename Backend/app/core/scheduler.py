@@ -16,6 +16,8 @@ def job_procesar_correos():
     db = SessionLocal()
     try:
         procesar_correos_nuevos(db)
+    except Exception:
+        logger.exception("Error en el job de procesar correos")
     finally:
         db.close()
 

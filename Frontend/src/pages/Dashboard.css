@@ -1,28 +1,23 @@
 .dashboard-layout {
-  display: grid;
-  grid-template-columns: 200px 1fr;
+  display: flex;
   min-height: 100vh;
   background: var(--paper);
 }
 
-/* ---------- Sidebar ---------- */
-
 .dashboard-sidebar {
+  width: 200px;
+  flex-shrink: 0;
   background: var(--ink);
   display: flex;
   flex-direction: column;
   padding: 20px 12px;
-  gap: 2px;
-  position: sticky;
-  top: 0;
-  height: 100vh;
 }
 
 .dashboard-sidebar-logo {
   display: flex;
   align-items: center;
   gap: 10px;
-  padding: 8px 10px 20px;
+  padding: 8px 10px 16px;
 }
 
 .dashboard-logo-mark {
@@ -39,11 +34,22 @@
   letter-spacing: 0.02em;
 }
 
+.dashboard-sidebar-top {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.dashboard-sidebar-divider {
+  height: 1px;
+  background: var(--hairline-on-ink);
+  margin: 14px 4px;
+}
+
 .dashboard-nav {
   display: flex;
   flex-direction: column;
   gap: 2px;
-  flex: 1;
 }
 
 .dashboard-nav-item {
@@ -73,58 +79,28 @@
   font-weight: 500;
 }
 
-.dashboard-sidebar-footer {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  padding-top: 12px;
-  border-top: 0.5px solid var(--hairline-on-ink);
-}
-
 .dashboard-signout-item {
   color: var(--text-on-ink-muted) !important;
-  font-size: 13px !important;
 }
-
-/* ---------- Contenido principal ---------- */
 
 .dashboard-main {
+  flex: 1;
   padding: 32px;
-  overflow: auto;
 }
-
-/* ---------- Responsive ---------- */
 
 @media (max-width: 860px) {
   .dashboard-layout {
-    grid-template-columns: 1fr;
+    flex-direction: column;
   }
 
- .dashboard-sidebar {
-  background: var(--ink);
-  display: flex;
-  flex-direction: column;
-  padding: 20px 12px;
-  gap: 2px;
-  position: sticky;
-  top: 0;
-  height: 100vh;
-  overflow: hidden;
-}
+  .dashboard-sidebar {
+    width: auto;
+  }
 
-.dashboard-nav {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  flex: 1;
-  min-height: 0;
-  overflow-y: auto;
-}
-
-  .dashboard-sidebar-footer {
+  .dashboard-sidebar-top,
+  .dashboard-nav {
     flex-direction: row;
-    border-top: none;
-    padding-top: 0;
+    flex-wrap: wrap;
   }
 
   .dashboard-main {

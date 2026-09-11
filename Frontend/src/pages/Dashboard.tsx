@@ -25,40 +25,13 @@ export function Dashboard() {
 
   return (
     <div className="dashboard-layout">
-      <aside className="dashboard-sidebar">
+            <aside className="dashboard-sidebar">
         <div className="dashboard-sidebar-logo">
           <div className="dashboard-logo-mark" />
           <span className="dashboard-logo-text">MONSORT</span>
         </div>
 
-        <nav className="dashboard-nav">
-          <button
-            className={`dashboard-nav-item${vista === "facturas-emitidas" ? " active" : ""}`}
-            onClick={() => setVista("facturas-emitidas")}
-          >
-            Facturas emitidas
-          </button>
-          <button
-            className={`dashboard-nav-item${vista === "facturas-recibidas" ? " active" : ""}`}
-            onClick={() => setVista("facturas-recibidas")}
-          >
-            Facturas recibidas
-          </button>
-          <button
-            className={`dashboard-nav-item${vista === "ordenes" ? " active" : ""}`}
-            onClick={() => setVista("ordenes")}
-          >
-            Órdenes de compra
-          </button>
-          <button
-            className={`dashboard-nav-item${vista === "clientes" ? " active" : ""}`}
-            onClick={() => setVista("clientes")}
-          >
-            Clientes
-          </button>
-        </nav>
-
-        <div className="dashboard-sidebar-footer">
+        <div className="dashboard-sidebar-top">
           {puedeCrearUsuarios && (
             <button
               className={`dashboard-nav-item${vista === "crear-usuario" ? " active" : ""}`}
@@ -74,11 +47,40 @@ export function Dashboard() {
             Cerrar sesión
           </button>
         </div>
+
+        <div className="dashboard-sidebar-divider" />
+
+        <nav className="dashboard-nav">
+          <button
+            className={`dashboard-nav-item${vista === "facturas-recibidas" ? " active" : ""}`}
+            onClick={() => setVista("facturas-recibidas")}
+          >
+            Facturas recibidas
+          </button>
+          <button
+            className={`dashboard-nav-item${vista === "facturas-emitidas" ? " active" : ""}`}
+            onClick={() => setVista("facturas-emitidas")}
+          >
+            Facturas emitidas
+          </button>
+          <button
+            className={`dashboard-nav-item${vista === "ordenes" ? " active" : ""}`}
+            onClick={() => setVista("ordenes")}
+          >
+            Órdenes de compra
+          </button>
+          <button
+            className={`dashboard-nav-item${vista === "clientes" ? " active" : ""}`}
+            onClick={() => setVista("clientes")}
+          >
+            Clientes
+          </button>
+        </nav>
       </aside>
 
       <main className="dashboard-main">
-        {vista === "facturas-emitidas" && <Facturas />}
-        {vista === "facturas-recibidas" && <FacturasRecibidas />}
+        {vista === "facturas-recibidas" && <Facturas />}
+        {vista === "facturas-emitidas" && <FacturasRecibidas />}
         {vista === "ordenes" && <OrdenesCompra />}
         {vista === "clientes" && <Clientes />}
         {vista === "crear-usuario" && (

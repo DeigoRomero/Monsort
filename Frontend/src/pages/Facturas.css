@@ -555,3 +555,13 @@
   padding: 8px 10px;
   border-radius: 6px;
 }
+
+.facturas-nota-historico {
+  margin: 0;
+  padding: 14px 28px;
+  background: var(--paper);
+  border-bottom: 1px solid var(--hairline);
+  font-size: 13.5px;
+  color: var(--text-muted);
+  line-height: 1.5;
+}

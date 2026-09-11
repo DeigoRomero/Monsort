@@ -1,18 +1,24 @@
 import { useState } from "react";
 import { useAuth } from "../context/AuthContext";
 import { Facturas } from "./Facturas";
+import { FacturasRecibidas } from "./FacturasRecibidas";
 import { OrdenesCompra } from "./OrdenesCompra";
 import { Clientes } from "./Clientes";
 import { Register } from "./Register";
 import "./Dashboard.css";
 
-type Vista = "facturas" | "ordenes" | "clientes" | "crear-usuario";
+type Vista =
+  | "facturas-emitidas"
+  | "facturas-recibidas"
+  | "ordenes"
+  | "clientes"
+  | "crear-usuario";
 
 const ROLES_ADMIN = ["desarrollador", "administrador"];
 
 export function Dashboard() {
   const { session, signOut } = useAuth();
-  const [vista, setVista] = useState<Vista>("facturas");
+  const [vista, setVista] = useState<Vista>("facturas-emitidas");
 
   const rol = session?.usuario.rol?.toLowerCase() ?? "";
   const puedeCrearUsuarios = ROLES_ADMIN.includes(rol);
@@ -27,8 +33,14 @@ export function Dashboard() {
 
         <nav className="dashboard-nav">
           <button
-            className={`dashboard-nav-item${vista === "facturas" ? " active" : ""}`}
-            onClick={() => setVista("facturas")}
+            className={`dashboard-nav-item${vista === "facturas-emitidas" ? " active" : ""}`}
+            onClick={() => setVista("facturas-emitidas")}
+          >
+            Facturas emitidas
+          </button>
+          <button
+            className={`dashboard-nav-item${vista === "facturas-recibidas" ? " active" : ""}`}
+            onClick={() => setVista("facturas-recibidas")}
           >
             Facturas recibidas
           </button>
@@ -65,11 +77,12 @@ export function Dashboard() {
       </aside>
 
       <main className="dashboard-main">
-        {vista === "facturas" && <Facturas />}
+        {vista === "facturas-emitidas" && <Facturas />}
+        {vista === "facturas-recibidas" && <FacturasRecibidas />}
         {vista === "ordenes" && <OrdenesCompra />}
         {vista === "clientes" && <Clientes />}
         {vista === "crear-usuario" && (
-          <Register onCancelar={() => setVista("facturas")} />
+          <Register onCancelar={() => setVista("facturas-emitidas")} />
         )}
       </main>
     </div>

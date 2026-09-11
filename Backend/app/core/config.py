@@ -14,6 +14,7 @@ class Settings(BaseSettings):
     SAT_KEY_PASSWORD: str | None = None
     GMAIL_REDIRECT_URI: str = "http://localhost:8000/auth/gmail/callback"
     CORS_ORIGINS: str = "http://localhost:5173,http://127.0.0.1:5173"
+    ENTORNO: str = "desarrollo"  # desarrollo, produccion
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 
 settings = Settings()

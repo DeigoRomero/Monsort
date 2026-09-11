@@ -1,4 +1,8 @@
+from contextlib import asynccontextmanager
+
 from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
+
 from app.api.rutas.health import router as EstadoRouter
 from app.api.rutas.auth import router as AuthRouter
 from app.api.rutas.facturas import router as FacturaRouter
@@ -8,12 +12,27 @@ from app.api.rutas.clientes import router as ClienteRouter
 from app.api.rutas.auth_gmail import router as AuthGmailRouter
 from app.api.rutas.facturas_recibidas import router as FacturaRecibidaRouter
 from app.modelos import usuario, factura, estados
-from fastapi.middleware.cors import CORSMiddleware
 from app.core.scheduler import scheduler
-from contextlib import asynccontextmanager
 from app.core.config import Settings
 
-origenes = [o.strip() for o in Settings().CORS_ORIGINS.split(",") if o.strip()]
+# Una sola instancia: aquí es donde se lee el .env
+settings = Settings()
+
+origenes = [
+    o.strip().rstrip("/")
+    for o in settings.CORS_ORIGINS.split(",")
+    if o.strip()
+]
+
+regex_desarrollo = (
+    r"^http://(localhost|127\.0\.0\.1)(:\d+)?$"
+    if settings.ENTORNO == "desarrollo"
+    else None
+)
+
+# TEMPORAL: confirma qué cargó el servidor. Bórralo cuando funcione.
+print(">>> CORS origenes:", repr(origenes), "| ENTORNO:", repr(settings.ENTORNO))
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -22,16 +41,17 @@ async def lifespan(app: FastAPI):
     yield
     scheduler.shutdown()
 
+
 aplicacion = FastAPI(lifespan=lifespan)
 
 aplicacion.add_middleware(
     CORSMiddleware,
     allow_origins=origenes,
+    allow_origin_regex=regex_desarrollo,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
-
 
 aplicacion.include_router(FacturaRouter, prefix="/facturas", tags=["Facturas"])
 aplicacion.include_router(EstadoRouter, prefix="/health", tags=["Health"])

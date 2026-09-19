@@ -693,8 +693,13 @@ def main() -> None:
                                       args.tipo, args.comprobante)
 
         if args.avanzar or args.ciclo:
+            from app.services.sat_descarga_client_real import construir_cliente_sat
+            cliente = construir_cliente_sat()
+            if cliente is None:
+                print("Sin e.firma: usando ClienteSATFalso")
+            else:
+                print(f"Cliente SAT REAL conectado (RFC {cliente.rfc})")
             vueltas = args.ciclo or 1
-            cliente = ClienteSATFalso()          # uno solo para todas las vueltas
             for vuelta in range(1, vueltas + 1):
                 resumen = avanzar_solicitudes(db, cliente=cliente)
                 print(f"\n--- vuelta {vuelta} ---")

@@ -131,22 +131,20 @@ def obtener_vigencia(certificado) -> tuple[datetime, datetime]:
 
 def clasificar_certificado(certificado) -> str:
     """
-    Distingue e.firma de CSD. No es infalible, pero el numero de serie de
-    los CSD suele empezar con '00001000000' y el uso de llave difiere:
-    la e.firma trae digital_signature + key_encipherment; el CSD
-    normalmente solo digital_signature + non_repudiation.
+    Distingue e.firma de CSD por keyUsage.
+
+    La e.firma del SAT trae capacidades de cifrado (data_encipherment
+    y key_agreement) porque sirve para trámites y autenticación.
+    El CSD solo firma: digital_signature + content_commitment.
     """
     try:
-        uso = certificado.extensions.get_extension_for_class(
-            __import__("cryptography.x509", fromlist=["KeyUsage"]).KeyUsage
-        ).value
-        if uso.key_encipherment and uso.data_encipherment:
+        from cryptography.x509 import KeyUsage
+        uso = certificado.extensions.get_extension_for_class(KeyUsage).value
+        if uso.data_encipherment or uso.key_encipherment or uso.key_agreement:
             return "e.firma (FIEL)"
-        if uso.content_commitment and not uso.key_encipherment:
-            return "CSD (sello digital)"
+        return "CSD (sello digital)"
     except Exception:
-        pass
-    return "indeterminado"
+        return "indeterminado"
 
 
 # ---------------------------------------------------------------------------
@@ -301,6 +299,21 @@ def main() -> None:
     print("=" * 72)
     print()
 
+    # --- keyUsage crudo ---
+    print()
+    print("Extension keyUsage (distingue e.firma de CSD)")
+    print("-" * 70)
+    try:
+        from cryptography.x509 import KeyUsage
+        uso = certificado.extensions.get_extension_for_class(KeyUsage).value
+        for nombre in ("digital_signature", "content_commitment", "key_encipherment",
+                       "data_encipherment", "key_agreement", "key_cert_sign",
+                       "crl_sign"):
+            print(f"  {nombre:<22} = {getattr(uso, nombre)}")
+    except Exception as error:
+        print(f"  No se pudo leer keyUsage: {error}")
 
 if __name__ == "__main__":
     main()
+
+

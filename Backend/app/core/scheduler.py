@@ -49,7 +49,9 @@ def job_descarga_masiva():
     """Avanza un paso las solicitudes activas de descarga masiva."""
     db = SessionLocal()
     try:
-        resumen = avanzar_solicitudes(db)
+        from app.services.sat_descarga_client_real import construir_cliente_sat
+        cliente = construir_cliente_sat()
+        resumen = avanzar_solicitudes(db, cliente=cliente)
         if resumen["transiciones"]:
             logger.info("Descarga masiva: %s", "; ".join(resumen["transiciones"]))
         if resumen["errores"]:

@@ -102,7 +102,7 @@ scheduler = BackgroundScheduler()
 scheduler.add_job(
     job_procesar_correos,
     "interval",
-    minutes=2,
+    minutes=5,
     id="procesar_correos",
     max_instances=1,
     coalesce=True,

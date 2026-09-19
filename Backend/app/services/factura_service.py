@@ -2,6 +2,7 @@ from app.modelos.configuracion import Configuracion_sistema
 from app.services.gmail_service import obtener_servicio_gmail, obtener_ultimo_mensaje, extraer_adjuntos, obtener_mensajes_nuevos
 from app.services.usuario_service import obtener_usuario_sistema, obtener_estado_pendiente
 from google.auth.exceptions import RefreshError
+from app.core.config import settings
 import hashlib
 import pdfplumber
 import io
@@ -62,7 +63,9 @@ def extraer_datos_xml(contenido_xml_bytes):
     serie = root.get('Serie', '')
     folio = root.get('Folio', '')
     folio_interno = f"{serie}{folio}" if serie or folio else None
-
+    emisor = root.find('cfdi:Emisor', namespaces)
+    rfc_emisor = emisor.get('Rfc', '').upper().strip() if emisor is not None else ''
+    nombre_emisor = emisor.get('Nombre', '').strip() if emisor is not None else ''
     receptor = root.find('cfdi:Receptor', namespaces)
     rfc = receptor.get('Rfc', '').upper().strip()
     nombre_receptor = receptor.get('Nombre', '').strip()    
@@ -96,6 +99,8 @@ def extraer_datos_xml(contenido_xml_bytes):
         'folio_interno': folio_interno,
         'rfc': rfc,
         'nombre_receptor': nombre_receptor,
+        'rfc_emisor': rfc_emisor,
+        'nombre_emisor': nombre_emisor,
         'fecha': fecha,
         'subtotal': subtotal,
         'iva': iva,
@@ -275,6 +280,10 @@ def clasificar_adjuntos(adjuntos: dict) -> dict:
             resultado["pdfs"][nombre] = contenido
 
         else:
+            logger.info(
+                "XML con TipoDeComprobante='%s' no procesado: %s",
+                tipo, nombre
+            )
             resultado["otros"].append(nombre)
 
     return resultado
@@ -371,6 +380,15 @@ def procesar_factura(xml_bytes, mensaje_id, db, usuario_sistema, indice_pdfs) ->
     """Devuelve True si insertó una factura nueva, False si ya existía."""
     datos_xml = extraer_datos_xml(xml_bytes)
     uuid_factura = datos_xml['folio_fiscal']
+
+    if datos_xml['rfc_emisor'] != settings.RFC_EMPRESA:
+        logger.warning(
+            "Factura %s: RFC emisor '%s' no coincide con RFC empresa '%s'. Se ignora.",
+            uuid_factura,
+            datos_xml['rfc_emisor'],
+            settings.RFC_EMPRESA
+        )
+        return False
 
     existente = db.query(Facturas).filter(
         Facturas.folio_fiscal == uuid_factura

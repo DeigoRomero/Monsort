@@ -6,8 +6,20 @@ from sqlalchemy.orm import Session
 from app.modelos.configuracion import Configuracion_sistema
 import base64
 import xml.etree.ElementTree as ET
-import logging 
+import logging
+import time
+
 logger = logging.getLogger(__name__)
+
+TIPOS_ADJUNTO = ('application/pdf', 'application/xml', 'text/xml',
+                 'application/octet-stream')
+
+# Gmail cobra cuota por llamada y cada adjunto es una llamada aparte.
+# Un correo con doce adjuntos agota el limite por minuto sin pausa.
+PAUSA_ENTRE_ADJUNTOS = 0.3
+INTENTOS_ADJUNTO = 4
+ESTADOS_TRANSITORIOS = (403, 429, 500, 502, 503, 504)
+
 
 def obtener_servicio_gmail(db: Session | None = None):
     # settings es el valor por defecto; la BD lo sobreescribe si existe.
@@ -35,6 +47,7 @@ def obtener_servicio_gmail(db: Session | None = None):
     )
     servicio = build('gmail', 'v1', credentials=creds)
     return servicio
+
 
 def obtener_mensajes_nuevos(db: Session, servicio=None):
     # El servicio se recibe ya construido para no hacer un segundo
@@ -121,8 +134,39 @@ def obtener_mensajes_nuevos(db: Session, servicio=None):
             logger.error("Error de Gmail API (%s): %s", error.resp.status, error)
 
         return [], None
-TIPOS_ADJUNTO = ('application/pdf', 'application/xml', 'text/xml',
-                 'application/octet-stream')
+
+
+def _descargar_adjunto(servicio, message_id, adjunto_id, nombre):
+    """
+    Descarga un adjunto reintentando ante errores transitorios.
+
+    NO captura el fallo final a proposito: si el adjunto no se puede
+    bajar, la excepcion debe llegar hasta procesar_correos_nuevos() para
+    que el correo caiga en CorreosFallidos y se pueda reprocesar.
+
+    Tragarse el error aqui significaria marcar el correo como procesado
+    con adjuntos faltantes, y como el historyId ya avanzo, esa factura
+    se perderia para siempre.
+    """
+    for intento in range(INTENTOS_ADJUNTO):
+        try:
+            adj = servicio.users().messages().attachments().get(
+                userId='me', messageId=message_id, id=adjunto_id
+            ).execute()
+            return base64.urlsafe_b64decode(adj['data'])
+
+        except HttpError as error:
+            ultimo = intento == INTENTOS_ADJUNTO - 1
+            if error.resp.status not in ESTADOS_TRANSITORIOS or ultimo:
+                raise
+
+            espera = 2 ** intento      # 1, 2, 4 segundos
+            logger.warning(
+                "Gmail %s al bajar %s de %s. Reintento %d/%d en %ds",
+                error.resp.status, nombre, message_id,
+                intento + 1, INTENTOS_ADJUNTO - 1, espera,
+            )
+            time.sleep(espera)
 
 
 def _recorrer_partes(servicio, message_id, partes, adjuntos):
@@ -159,16 +203,13 @@ def _recorrer_partes(servicio, message_id, partes, adjuntos):
         if nombre in adjuntos:
             continue
 
-        try:
-            adj = servicio.users().messages().attachments().get(
-                userId='me', messageId=message_id, id=adjunto_id
-            ).execute()
-            adjuntos[nombre] = base64.urlsafe_b64decode(adj['data'])
-        except HttpError as error:
-            logger.warning(
-                "No se pudo descargar el adjunto %s de %s: %s",
-                nombre, message_id, error
-            )
+        adjuntos[nombre] = _descargar_adjunto(
+            servicio, message_id, adjunto_id, nombre
+        )
+
+        # Espaciar las llamadas: la cuota de Gmail es por minuto y por
+        # usuario, y un correo con muchos adjuntos la agota de golpe.
+        time.sleep(PAUSA_ENTRE_ADJUNTOS)
 
 
 def extraer_adjuntos(servicio, message_id):
@@ -190,12 +231,13 @@ def extraer_adjuntos(servicio, message_id):
 
     return adjuntos, asunto
 
+
 def obtener_ultimo_mensaje(servicio):
     resultado = servicio.users().messages().list(
         userId='me',
         maxResults=1
     ).execute()
-    
+
     mensajes = resultado.get('messages', [])
     if mensajes:
         return mensajes[0]['id']

@@ -20,6 +20,17 @@ class ComplementosPago(Base):
     monto = Column(Numeric(12, 2), nullable=True)
     forma_pago = Column(String(50), nullable=True)
 
+    # Partes del CFDI. Sin esto no habia forma de distinguir un CP propio de
+    # uno ajeno: procesar_complemento_pago() guardaba cualquier CP que llegara
+    # al buzon, incluyendo los de otras empresas reenviados o en copia. Sus
+    # DoctoRelacionado apuntan a facturas que nunca van a estar en Facturas,
+    # asi que quedaban como huerfanos permanentes.
+    # Nullable: los CPs guardados antes de esta columna se rellenan desde
+    # archivo_xml en la migracion; los que no tengan XML legible quedan en NULL
+    # y se tratan como "no se sabe", nunca como ajenos.
+    rfc_emisor = Column(String(13), nullable=True, index=True)
+    rfc_receptor = Column(String(13), nullable=True)
+
     archivo_xml = Column(LargeBinary, nullable=True)
     archivo_pdf = Column(LargeBinary, nullable=True)
 

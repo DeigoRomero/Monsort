@@ -12,12 +12,13 @@ FastAPI intenta parsear "resumen" como int y devuelve 422.
 """
 
 from fastapi import APIRouter, Depends, HTTPException, Response, Query
-from sqlalchemy import func, or_, desc
+from sqlalchemy import func, or_, and_, desc
 from sqlalchemy.orm import Session
 from math import ceil
 from decimal import Decimal
 
 from app.BaseDeDatos import get_db
+from app.core.config import settings
 from app.modelos.complemento_pago import ComplementosPago
 from app.modelos.cp_documento_relacionado import CPDocumentosRelacionados
 from app.modelos.correo_procesado import CorreosProcesados, CorreosFallidos
@@ -54,9 +55,50 @@ COLUMNAS_LISTADO = (
     ComplementosPago.tipo_cambio,
     ComplementosPago.forma_pago,
     ComplementosPago.cancelado,
+    ComplementosPago.rfc_emisor,
+    ComplementosPago.rfc_receptor,
     ComplementosPago.archivo_pdf.isnot(None).label("tiene_pdf"),
     ComplementosPago.archivo_xml.isnot(None).label("tiene_xml"),
 )
+
+
+# ─────────────────────────────────────────────
+# DE QUIÉN ES EL CP
+# ─────────────────────────────────────────────
+
+DIRECCION_EMITIDO = "emitido"        # lo emitimos nosotros: nos pagaron
+DIRECCION_RECIBIDO = "recibido"      # nos lo emitieron: pagamos a un proveedor
+DIRECCION_AJENO = "ajeno"            # de otra empresa, llegó por copia o reenvío
+DIRECCION_DESCONOCIDA = "desconocido"  # sin RFC legibles en el XML
+
+
+def _direccion(rfc_emisor: str | None, rfc_receptor: str | None) -> str:
+    """
+    Clasifica el CP por las partes del CFDI.
+
+    Importa para el listado de huérfanos: solo los DoctoRelacionado de un CP
+    *emitido* deberían encontrar su factura en `Facturas`. Los de un CP
+    recibido apuntan a facturas de proveedor (`FacturasRecibidas`) y los de uno
+    ajeno a facturas de un tercero que nunca van a estar aquí. Contarlos como
+    pendientes del cliente es reportar un problema que no existe.
+    """
+    propio = settings.RFC_EMPRESA.upper()
+    if rfc_emisor == propio:
+        return DIRECCION_EMITIDO
+    if rfc_receptor == propio:
+        return DIRECCION_RECIBIDO
+    if rfc_emisor and rfc_receptor:
+        return DIRECCION_AJENO
+    return DIRECCION_DESCONOCIDA
+
+
+def _es_no_emitido():
+    """CP que con certeza no emitimos nosotros (recibido o ajeno)."""
+    propio = settings.RFC_EMPRESA.upper()
+    return and_(
+        ComplementosPago.rfc_emisor.isnot(None),
+        ComplementosPago.rfc_emisor != propio,
+    )
 
 
 def _existe_documento(db: Session, solo_huerfanos: bool = False):
@@ -87,6 +129,38 @@ def _condiciones(db: Session, filtros: FiltrosComplemento) -> list:
             referido,
         ))
 
+    if filtros.direccion:
+        propio = settings.RFC_EMPRESA.upper()
+        # coalesce para que un RFC nulo compare como distinto sin arrastrar
+        # NULL por toda la condición.
+        emisor = func.coalesce(ComplementosPago.rfc_emisor, "")
+        receptor = func.coalesce(ComplementosPago.rfc_receptor, "")
+        pedida = filtros.direccion.strip().lower()
+
+        if pedida == DIRECCION_EMITIDO:
+            condiciones.append(emisor == propio)
+        elif pedida == DIRECCION_RECIBIDO:
+            condiciones.append(and_(emisor != propio, receptor == propio))
+        elif pedida == DIRECCION_AJENO:
+            condiciones.append(and_(
+                ComplementosPago.rfc_emisor.isnot(None),
+                ComplementosPago.rfc_receptor.isnot(None),
+                emisor != propio, receptor != propio,
+            ))
+        elif pedida == DIRECCION_DESCONOCIDA:
+            condiciones.append(and_(
+                emisor != propio, receptor != propio,
+                or_(ComplementosPago.rfc_emisor.is_(None),
+                    ComplementosPago.rfc_receptor.is_(None)),
+            ))
+        else:
+            raise HTTPException(
+                status_code=422,
+                detail=f"direccion inválida: '{filtros.direccion}'. Use "
+                       f"{DIRECCION_EMITIDO}, {DIRECCION_RECIBIDO}, "
+                       f"{DIRECCION_AJENO} o {DIRECCION_DESCONOCIDA}",
+            )
+
     if filtros.forma_pago:
         condiciones.append(ComplementosPago.forma_pago.ilike(f"%{filtros.forma_pago}%"))
 
@@ -113,15 +187,27 @@ def _condiciones(db: Session, filtros: FiltrosComplemento) -> list:
 
 
 def _evaluar_atencion(tiene_pdf: bool, fecha_pago, huerfanos: int,
-                      cancelado: bool) -> tuple[bool, str | None]:
+                      cancelado: bool,
+                      direccion: str = DIRECCION_EMITIDO) -> tuple[bool, str | None]:
     """Un CP cancelado no pide captura: ya está fuera de juego."""
     if cancelado:
         return False, None
 
+    if direccion == DIRECCION_AJENO:
+        return True, (
+            "CP de otra empresa: ni emisor ni receptor es la empresa. "
+            "Llegó al buzón por copia o reenvío y puede borrarse"
+        )
+
     motivos = []
     if fecha_pago is None:
         motivos.append("sin fecha de pago en el XML")
-    if huerfanos:
+    if huerfanos and direccion == DIRECCION_RECIBIDO:
+        motivos.append(
+            f"{huerfanos} documento(s) de proveedor: son facturas recibidas, "
+            "no emitidas, por eso no se vinculan aquí"
+        )
+    elif huerfanos:
         motivos.append(f"{huerfanos} documento(s) sin factura vinculada")
     if not tiene_pdf:
         motivos.append("sin PDF")
@@ -245,8 +331,10 @@ def listar_complementos(
         vinculados = sum(1 for d in docs if d[1] is not None)
         huerfanos = len(docs) - vinculados
 
+        direccion = _direccion(fila.rfc_emisor, fila.rfc_receptor)
         atencion, motivo = _evaluar_atencion(
-            fila.tiene_pdf, fila.fecha_pago, huerfanos, fila.cancelado
+            fila.tiene_pdf, fila.fecha_pago, huerfanos, fila.cancelado,
+            direccion,
         )
 
         resultado.append(ComplementoListado(
@@ -260,6 +348,9 @@ def listar_complementos(
             tipo_cambio=fila.tipo_cambio,
             forma_pago=fila.forma_pago,
             cancelado=fila.cancelado,
+            rfc_emisor=fila.rfc_emisor,
+            rfc_receptor=fila.rfc_receptor,
+            direccion=direccion,
             tiene_pdf=fila.tiene_pdf,
             tiene_xml=fila.tiene_xml,
             documentos_total=len(docs),
@@ -334,6 +425,11 @@ def obtener_resumen(
             tags=["Complementos de pago"])
 def listar_huerfanos(
     limite: int = Query(200, ge=1, le=1000),
+    incluir_no_emitidos: bool = Query(
+        False,
+        description="Incluye CPs recibidos y ajenos, cuyos documentos nunca "
+                    "van a estar en Facturas. Solo para revisión."
+    ),
     db: Session = Depends(get_db),
 ):
     """
@@ -347,7 +443,15 @@ def listar_huerfanos(
     factura ausente del histórico del Excel, o una emitida antes de que el
     sistema existiera. `GET /sat/uuid/{folio}` lo contesta con datos: dice si el
     SAT la registra y de qué mes es.
+
+    Solo se listan los CPs que emitió la empresa. Un CP recibido de un
+    proveedor, o uno ajeno que llegó al buzón por copia, referencia facturas
+    que por definición no están en `Facturas`: aparecían aquí como pendientes
+    del cliente sin serlo. `incluir_no_emitidos=true` los trae de vuelta para
+    revisarlos.
     """
+    condiciones_extra = [] if incluir_no_emitidos else [~_es_no_emitido()]
+
     filas = (
         db.query(
             CPDocumentosRelacionados,
@@ -355,6 +459,8 @@ def listar_huerfanos(
             ComplementosPago.uuid_cp,
             ComplementosPago.folio,
             ComplementosPago.fecha_pago,
+            ComplementosPago.rfc_emisor,
+            ComplementosPago.rfc_receptor,
             Facturas.id_factura,
             Estados.nombre_estado,
         )
@@ -368,6 +474,7 @@ def listar_huerfanos(
         .filter(
             CPDocumentosRelacionados.id_factura.is_(None),
             ComplementosPago.cancelado == False,  # noqa: E712
+            *condiciones_extra,
         )
         .order_by(desc(ComplementosPago.fecha_pago).nullslast())
         .limit(limite)
@@ -375,10 +482,24 @@ def listar_huerfanos(
     )
 
     salida = []
-    for doc, id_cp, uuid_cp, folio_cp, fecha_pago, id_factura, estado in filas:
+    for (doc, id_cp, uuid_cp, folio_cp, fecha_pago,
+         rfc_emisor, rfc_receptor, id_factura, estado) in filas:
         existe = id_factura is not None
+        direccion = _direccion(rfc_emisor, rfc_receptor)
 
-        if not existe:
+        if direccion == DIRECCION_AJENO:
+            motivo = (
+                f"El CP es de otra empresa (emisor {rfc_emisor}, receptor "
+                f"{rfc_receptor}). No es un pendiente: el documento no "
+                "debería estar en la base"
+            )
+        elif direccion == DIRECCION_RECIBIDO:
+            motivo = (
+                f"CP recibido de {rfc_emisor}: paga una factura de proveedor, "
+                "que vive en FacturasRecibidas y no en Facturas. No es un "
+                "pendiente de cobranza"
+            )
+        elif not existe:
             # Sin afirmar la causa: el 26/09/2026 el texto decía "se emitió
             # antes de que el sistema capturara correo", y dejó de ser cierto
             # en cuanto el reproceso completó septiembre. Puede ser eso, o un
@@ -405,6 +526,7 @@ def listar_huerfanos(
             imp_saldo_insoluto=doc.imp_saldo_insoluto,
             factura_existe=existe,
             estado_factura=estado,
+            direccion=direccion,
             motivo=motivo,
         ))
 
@@ -432,6 +554,23 @@ def diagnostico(db: Session = Depends(get_db)):
         func.count(ComplementosPago.fecha_pago),
         func.max(ComplementosPago.fecha_recepcion),
     ).first()
+
+    # Cuántos CPs no emitió la empresa. Antes del arreglo del 26/09/2026 la
+    # ingesta guardaba cualquier CP que llegara al buzón; estos son los que
+    # entraron así y siguen en la base.
+    propio = settings.RFC_EMPRESA.upper()
+    emisor = func.coalesce(ComplementosPago.rfc_emisor, "")
+    receptor = func.coalesce(ComplementosPago.rfc_receptor, "")
+
+    cp_recibidos = db.query(func.count(ComplementosPago.id)).filter(
+        emisor != propio, receptor == propio
+    ).scalar() or 0
+
+    cp_ajenos = db.query(func.count(ComplementosPago.id)).filter(
+        ComplementosPago.rfc_emisor.isnot(None),
+        ComplementosPago.rfc_receptor.isnot(None),
+        emisor != propio, receptor != propio,
+    ).scalar() or 0
 
     docs_total, docs_vinculados = db.query(
         func.count(CPDocumentosRelacionados.id),
@@ -481,6 +620,8 @@ def diagnostico(db: Session = Depends(get_db)):
 
     return DiagnosticoCorreos(
         complementos_guardados=cp_total or 0,
+        complementos_recibidos=cp_recibidos,
+        complementos_ajenos=cp_ajenos,
         complementos_cancelados=cp_cancelados or 0,
         complementos_sin_pdf=(cp_total or 0) - (cp_con_pdf or 0),
         complementos_sin_fecha_pago=(cp_total or 0) - (cp_con_fecha or 0),
@@ -599,8 +740,9 @@ def obtener_complemento(id_cp: int, db: Session = Depends(get_db)):
     docs = _documentos_por_complemento(db, [id_cp]).get(id_cp, [])
     huerfanos = sum(1 for d in docs if d[1] is None)
 
+    direccion = _direccion(fila.rfc_emisor, fila.rfc_receptor)
     atencion, motivo = _evaluar_atencion(
-        fila.tiene_pdf, fila.fecha_pago, huerfanos, fila.cancelado
+        fila.tiene_pdf, fila.fecha_pago, huerfanos, fila.cancelado, direccion
     )
 
     return ComplementoDetalle(
@@ -614,6 +756,9 @@ def obtener_complemento(id_cp: int, db: Session = Depends(get_db)):
         tipo_cambio=fila.tipo_cambio,
         forma_pago=fila.forma_pago,
         message_id=fila.message_id,
+        rfc_emisor=fila.rfc_emisor,
+        rfc_receptor=fila.rfc_receptor,
+        direccion=direccion,
         tiene_pdf=fila.tiene_pdf,
         tiene_xml=fila.tiene_xml,
         cancelado=fila.cancelado,

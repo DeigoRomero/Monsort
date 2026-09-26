@@ -46,6 +46,14 @@ class ComplementoListado(BaseModel):
     tipo_cambio: Decimal | None = None
     forma_pago: str | None = None
     cancelado: bool = False
+
+    # Partes del CFDI. `direccion` es el resumen legible: emitido (nos pagan),
+    # recibido (pagamos a un proveedor), ajeno (de otra empresa, llegó al
+    # buzón por copia) o desconocido (el XML no trae RFC legibles).
+    rfc_emisor: str | None = None
+    rfc_receptor: str | None = None
+    direccion: str = "desconocido"
+
     tiene_pdf: bool = False
     tiene_xml: bool = False
 
@@ -92,6 +100,9 @@ class ComplementoDetalle(BaseModel):
     tipo_cambio: Decimal | None = None
     forma_pago: str | None = None
     message_id: str | None = None
+    rfc_emisor: str | None = None
+    rfc_receptor: str | None = None
+    direccion: str = "desconocido"
     tiene_pdf: bool = False
     tiene_xml: bool = False
 
@@ -113,6 +124,7 @@ class FiltrosComplemento(BaseModel):
     forma_pago: str | None = None
     vinculado: bool | None = None           # True = todos sus documentos pegados
     incluir_cancelados: bool = False
+    direccion: str | None = None            # emitido / recibido / ajeno
     solo_atencion: bool = False             # sin PDF, sin fecha de pago, o con huérfanos
 
     fecha_desde: date | None = None         # sobre fecha_pago
@@ -141,6 +153,9 @@ class DocumentoHuerfano(BaseModel):
     imp_saldo_insoluto: Decimal | None = None
     factura_existe: bool
     estado_factura: str | None = None
+    # emitido / recibido / ajeno / desconocido. Un huérfano de un CP que no
+    # emitimos nosotros no es un pendiente de cobranza.
+    direccion: str = "desconocido"
     motivo: str
 
 
@@ -166,6 +181,10 @@ class DiagnosticoCorreos(BaseModel):
     """Lo que antes había que sacar a mano con psql en el VPS."""
 
     complementos_guardados: int
+    # CPs que no emitió la empresa: recibidos de proveedor, o ajenos que
+    # entraron por copia antes de que la ingesta filtrara por RFC.
+    complementos_recibidos: int = 0
+    complementos_ajenos: int = 0
     complementos_cancelados: int
     complementos_sin_pdf: int
     complementos_sin_fecha_pago: int

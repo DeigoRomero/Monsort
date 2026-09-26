@@ -170,6 +170,13 @@ def _buscar_por_tag(raiz, nombre: str) -> list:
     return [e for e in raiz.iter() if _tag_local(e) == nombre]
 
 
+def _rfc(valor) -> str | None:
+    """'  msf140227bf7 ' -> 'MSF140227BF7'. Vacio -> None."""
+    if not valor:
+        return None
+    return str(valor).strip().upper() or None
+
+
 def _a_decimal(valor):
     if valor in (None, ""):
         return None
@@ -188,6 +195,13 @@ def extraer_datos_cp(xml_bytes):
 
     timbres = _buscar_por_tag(root, 'TimbreFiscalDigital')
     uuid_cp = normalizar_uuid(timbres[0].get('UUID')) if timbres else None
+
+    # Quien emite y quien recibe. Es lo unico que permite saber si el CP es de
+    # la empresa o de un tercero que llego al buzon por copia o reenvio.
+    emisores = _buscar_por_tag(root, 'Emisor')
+    receptores = _buscar_por_tag(root, 'Receptor')
+    rfc_emisor = _rfc(emisores[0].get('Rfc')) if emisores else None
+    rfc_receptor = _rfc(receptores[0].get('Rfc')) if receptores else None
 
     documentos = []
     fecha_pago = None
@@ -233,6 +247,8 @@ def extraer_datos_cp(xml_bytes):
     return {
         'uuid_cp': uuid_cp,
         'folio_interno': folio_interno,
+        'rfc_emisor': rfc_emisor,
+        'rfc_receptor': rfc_receptor,
         'fecha_pago': fecha_pago,
         'moneda': moneda,
         'tipo_cambio': tipo_cambio,
@@ -617,6 +633,32 @@ def procesar_complemento_pago(xml_bytes, mensaje_id, db, indice_pdfs) -> bool:
             "XML sin timbrar o fuera de norma."
         )
 
+    # Un CP de otra empresa no tiene nada que hacer en esta base: sus
+    # DoctoRelacionado apuntan a facturas de un tercero, que nunca van a estar
+    # en Facturas, y aparecian para siempre en /complementos/huerfanos como si
+    # fueran un pendiente del cliente. El buzon recibe correo en copia y
+    # reenviado, asi que esto pasa solo.
+    #
+    # El criterio es el mismo que procesar_factura() ya aplicaba a las
+    # facturas — ahi la asimetria: las facturas ajenas se descartaban desde
+    # siempre y los CP ajenos no.
+    #
+    # Se acepta el CP si la empresa es emisor (CP propio: cobramos) o receptor
+    # (CP de un proveedor: nos cobran). Se rechaza solo cuando ambos RFC se
+    # conocen y ninguno es el nuestro. Si el XML no trae RFC legibles se
+    # guarda: no saber no es razon para tirar un documento fiscal.
+    rfc_emisor = datos_cp['rfc_emisor']
+    rfc_receptor = datos_cp['rfc_receptor']
+    propio = settings.RFC_EMPRESA.upper()
+    if (rfc_emisor and rfc_receptor
+            and propio not in (rfc_emisor, rfc_receptor)):
+        logger.warning(
+            "CP %s ajeno: emisor '%s', receptor '%s'. Ninguno es '%s'. "
+            "No se guarda (correo %s).",
+            datos_cp['uuid_cp'], rfc_emisor, rfc_receptor, propio, mensaje_id
+        )
+        return False
+
     existente = db.query(ComplementosPago).filter(
         ComplementosPago.uuid_cp == datos_cp['uuid_cp']
     ).first()
@@ -645,6 +687,8 @@ def procesar_complemento_pago(xml_bytes, mensaje_id, db, indice_pdfs) -> bool:
         tipo_cambio=datos_cp['tipo_cambio'],
         monto=datos_cp['monto'],
         forma_pago=datos_cp['forma_pago'],
+        rfc_emisor=rfc_emisor,
+        rfc_receptor=rfc_receptor,
         archivo_xml=xml_bytes,
         archivo_pdf=pdf_bytes,
         hash_archivo=hashlib.sha256(pdf_bytes).hexdigest() if pdf_bytes else None,

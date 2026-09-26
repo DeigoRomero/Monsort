@@ -1,6 +1,6 @@
 [Unit]
 Description=Monsort API (FastAPI + uvicorn)
-Documentation=https://github.com/tu-usuario/ProyectoMonsort
+Documentation=https://github.com/DeigoRomero/Monsort
 After=network.target postgresql.service
 Requires=postgresql.service
 
@@ -16,16 +16,24 @@ Environment="PYTHONUNBUFFERED=1"
 
 # --workers 1 NO es negociable.
 # APScheduler vive dentro del proceso de FastAPI. Con N workers habria
-# N schedulers disparando los tres jobs en paralelo: correos duplicados,
+# N schedulers disparando los jobs en paralelo: correos duplicados,
 # consultas al SAT concurrentes (prohibido), y solicitudes de descarga
 # masiva repetidas que queman la cuota de por vida del RFC.
+#
+# --root-path /api tampoco es negociable. nginx recorta el prefijo /api antes
+# de pasar la peticion a uvicorn, asi que sin esto FastAPI arma sus propios
+# redirects (el 307 por barra final, el callback de OAuth) sin el prefijo y
+# apuntan fuera del sitio. Se verifica con:
+#     curl -IL https://facturas.grupomonsort.com/api/health
+# debe redirigir a /api/health/ y no a /health/.
 ExecStart=/srv/monsort/.venv/bin/uvicorn \
     main:aplicacion \
     --host 127.0.0.1 \
     --port 8000 \
     --workers 1 \
     --proxy-headers \
-    --forwarded-allow-ips='127.0.0.1' \
+    --forwarded-allow-ips=127.0.0.1 \
+    --root-path /api \
     --log-level info
 
 Restart=always

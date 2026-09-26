@@ -19,8 +19,8 @@ Environment="PYTHONUNBUFFERED=1"
 # N schedulers disparando los tres jobs en paralelo: correos duplicados,
 # consultas al SAT concurrentes (prohibido), y solicitudes de descarga
 # masiva repetidas que queman la cuota de por vida del RFC.
-ExecStart=/srv/monsort/ProyectoMonsort/.venv/bin/uvicorn \
-    app.main:aplicacion \
+ExecStart=/srv/monsort/.venv/bin/uvicorn \
+    main:aplicacion \
     --host 127.0.0.1 \
     --port 8000 \
     --workers 1 \

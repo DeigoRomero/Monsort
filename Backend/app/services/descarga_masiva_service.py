@@ -38,6 +38,7 @@ import json
 import logging
 import zipfile
 from datetime import date, datetime, timedelta, timezone
+from zoneinfo import ZoneInfo
 
 from sqlalchemy.orm import Session
 
@@ -76,7 +77,7 @@ ESTADOS_TERMINALES = (INGESTADA, VACIA, FALLIDA, RECHAZADA)
 CODIGOS_RECHAZO = (CODIGO_CUOTA_AGOTADA, CODIGO_DUPLICADA, CODIGO_TOPE_MAXIMO)
 
 # El SAT puede tardar de minutos a horas. Se insiste con espera creciente.
-MAX_INTENTOS_VERIFICACION = 40
+MAX_INTENTOS_VERIFICACION = 100
 ESPERA_BASE_MINUTOS = 5
 ESPERA_MAXIMA_MINUTOS = 60
 
@@ -89,6 +90,14 @@ RFC_EMISOR = "MSF140227BF7"
 
 def _ahora() -> datetime:
     return datetime.now(timezone.utc)
+
+
+ZONA_MEXICO = ZoneInfo("America/Mexico_City")
+
+
+def _hoy_mexico() -> date:
+    """Fecha de HOY en Ciudad de Mexico, no la del reloj del servidor (UTC)."""
+    return datetime.now(ZONA_MEXICO).date()
 
 
 def _cargar_lista(texto: str | None) -> list[str]:
@@ -233,7 +242,7 @@ def crear_solicitud_ventana_movil(
         logger.info("Barrido diario ya ejecutado hoy (solicitud #%s)", ya_hubo.id)
         return None
 
-    fecha_final = date.today()
+    fecha_final = _hoy_mexico()
     fecha_inicial = fecha_final - timedelta(days=dias)
 
     solicitud = crear_solicitud(

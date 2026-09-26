@@ -56,6 +56,11 @@ def job_descarga_masiva():
             logger.info("Descarga masiva: %s", "; ".join(resumen["transiciones"]))
         if resumen["errores"]:
             logger.error("Descarga masiva: %d errores", resumen["errores"])
+        if not resumen["transiciones"] and not resumen["errores"]:
+            logger.info(
+                "Descarga masiva: sin cambios (%d activa(s) revisada(s))",
+                resumen.get("revisadas", 0),
+            )
     except Exception:
         logger.exception("Error en el job de descarga masiva")
     finally:

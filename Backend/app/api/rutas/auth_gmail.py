@@ -31,6 +31,13 @@ def _construir_flujo() -> Flow:
     }
     flujo = Flow.from_client_config(configuracion, scopes=SCOPES)
     flujo.redirect_uri = settings.GMAIL_REDIRECT_URI
+    # PKCE requiere conservar el 'code_verifier' entre /iniciar y
+    # /callback, pero cada peticion arma su propio Flow y el de
+    # /iniciar muere al responder. Este es un cliente web
+    # confidencial: el client_secret vive solo en el servidor y ya
+    # cumple esa funcion, asi que PKCE no aporta aqui.
+    flujo.autogenerate_code_verifier = False
+    flujo.code_verifier = None
     return flujo
 
 

@@ -6,6 +6,7 @@ from app.services.gmail_service import (
 from app.services.usuario_service import obtener_usuario_sistema, obtener_estado_pendiente
 from google.auth.exceptions import RefreshError
 from app.core.config import settings
+from sqlalchemy import or_
 from decimal import Decimal, InvalidOperation
 import hashlib
 import pdfplumber
@@ -87,7 +88,7 @@ def extraer_datos_xml(contenido_xml_bytes):
     nombre_receptor = receptor.get('Nombre', '').strip()    
 
     timbre = root.find('.//tfd:TimbreFiscalDigital', namespaces)
-    folio_fiscal = timbre.get('UUID')
+    folio_fiscal = normalizar_uuid(timbre.get('UUID'))
 
     impuestos = root.find('cfdi:Impuestos', namespaces)
     iva = impuestos.get('TotalImpuestosTrasladados') if impuestos is not None else None
@@ -126,6 +127,25 @@ def extraer_datos_xml(contenido_xml_bytes):
         'numero_oc': numero_oc,
         'conceptos': conceptos_lista
     }
+
+
+def normalizar_uuid(valor):
+    """
+    Deja todo folio fiscal en MAYUSCULAS y sin espacios.
+
+    El SAT especifica el UUID en mayusculas, pero no todos los emisores lo
+    respetan: hay PACs que escriben el IdDocumento de un DoctoRelacionado en
+    minusculas. Como reconciliar() compara con == y Postgres distingue
+    mayusculas, el mismo documento con distinta caja no se encuentra nunca.
+    Al 26/09/2026 eso dejaba 23 de 46 pagos sin pegar a su factura.
+
+    Se normaliza al ESCRIBIR, no al consultar: asi todas las comparaciones que
+    ya existen en el proyecto siguen sirviendo sin tocarlas una por una.
+    """
+    if valor is None:
+        return None
+    limpio = str(valor).strip().upper()
+    return limpio or None
 
 
 def _tag_local(elemento) -> str:
@@ -167,7 +187,7 @@ def extraer_datos_cp(xml_bytes):
     folio_interno = f"{serie}{folio}" if serie or folio else None
 
     timbres = _buscar_por_tag(root, 'TimbreFiscalDigital')
-    uuid_cp = timbres[0].get('UUID') if timbres else None
+    uuid_cp = normalizar_uuid(timbres[0].get('UUID')) if timbres else None
 
     documentos = []
     fecha_pago = None
@@ -203,7 +223,8 @@ def extraer_datos_cp(xml_bytes):
 
         for docto in _buscar_por_tag(pago, 'DoctoRelacionado'):
             documentos.append({
-                'uuid_documento': docto.get('IdDocumento'),
+                # normalizado: hay emisores que lo escriben en minusculas
+                'uuid_documento': normalizar_uuid(docto.get('IdDocumento')),
                 'num_parcialidad': docto.get('NumParcialidad'),
                 'imp_pagado': docto.get('ImpPagado'),
                 'imp_saldo_insoluto': docto.get('ImpSaldoInsoluto')
@@ -822,8 +843,25 @@ def _tiene_cp_activo(db, id_factura: int) -> bool:
 def reconciliar(db):
     """
     Enlaza OCs con facturas y CPs con facturas. Idempotente.
-    NO toca facturas en estado terminal (Cancelada, Revisada), ni CPs
-    cancelados.
+
+    Distingue tres cosas que antes iban detras del mismo filtro de estados
+    terminales, y esa mezcla escondia pagos:
+
+      1. VINCULAR un documento de CP con su factura: se hace SIEMPRE, en
+         cualquier estado. Que una factura este Cancelada o venga del
+         historico del Excel no cambia el hecho de que ese pago la
+         referencia, y registrarlo es informacion que el cliente necesita.
+         Antes se excluian los estados terminales, y como 718 de 755
+         facturas estan en 'Historico', casi cualquier pago contra el
+         historico se perdia en el aire.
+      2. fecha_liquidacion: tambien se escribe en cualquier estado. Es un
+         hecho ("esta factura se pago el dia X"), no una decision de flujo.
+      3. id_estado: SOLO se recalcula en facturas no terminales. Aqui si hay
+         que respetar la frontera, porque 'Cancelada', 'Revisada' e
+         'Historico' son decisiones tomadas que reconciliar() no debe
+         deshacer.
+
+    Los CPs cancelados se siguen excluyendo de todo.
     """
     estado_captura = obtener_estado(db, "Requiere captura manual")
     estado_pendiente_cp = obtener_estado(db, "Pendiente de CP")
@@ -846,9 +884,10 @@ def reconciliar(db):
     )
 
     for doc in docs_sueltos:
+        # Sin filtro de estado: vincular es registrar un hecho, no mover el
+        # flujo. El estado se respeta mas abajo, en el paso 3.
         factura = db.query(Facturas).filter(
-            Facturas.folio_fiscal == doc.uuid_documento,
-            Facturas.id_estado.notin_(ids_terminales)
+            Facturas.folio_fiscal == doc.uuid_documento
         ).first()
         if factura:
             doc.id_factura = factura.id_factura
@@ -872,12 +911,27 @@ def reconciliar(db):
 
     db.flush()
 
-    # --- 3. Recalcular estado y fecha_liquidacion ---
-    facturas_activas = db.query(Facturas).filter(
-        Facturas.id_estado.notin_(ids_terminales)
-    ).all()
+    # --- 3. fecha_liquidacion (todas) y estado (solo las no terminales) ---
+    #
+    # Se recorren TODAS las facturas que tengan un CP vinculado, mas las
+    # activas. Antes solo se miraban las activas, asi que una factura del
+    # historico podia quedar con su pago vinculado y sin fecha_liquidacion.
+    ids_con_cp = [
+        fila[0] for fila in db.query(CPDocumentosRelacionados.id_factura)
+        .filter(CPDocumentosRelacionados.id_factura.isnot(None))
+        .distinct()
+        .all()
+    ]
 
-    for factura in facturas_activas:
+    condiciones = [Facturas.id_estado.notin_(ids_terminales)]
+    if ids_con_cp:
+        condiciones.append(Facturas.id_factura.in_(ids_con_cp))
+
+    facturas = db.query(Facturas).filter(or_(*condiciones)).all()
+
+    for factura in facturas:
+        es_terminal = factura.id_estado in ids_terminales
+
         doc_liquidacion = (
             db.query(CPDocumentosRelacionados)
             .join(ComplementosPago, CPDocumentosRelacionados.id_complemento == ComplementosPago.id)
@@ -894,7 +948,14 @@ def reconciliar(db):
                 ComplementosPago.id == doc_liquidacion.id_complemento
             ).first()
             if cp and cp.fecha_pago:
+                # Se escribe incluso en terminales: es un hecho fiscal.
                 factura.fecha_liquidacion = cp.fecha_pago.date()
+
+        if es_terminal:
+            # 'Cancelada', 'Revisada' e 'Historico' son decisiones tomadas.
+            continue
+
+        if doc_liquidacion:
             factura.id_estado = estado_revision.id_estado
 
         elif not factura.numero_oc:

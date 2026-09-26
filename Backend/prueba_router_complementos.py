@@ -235,8 +235,9 @@ afirmar(por_uuid["CP-HUERFANO"]["factura_existe"] is False
         and "no está en la base" in por_uuid["CP-HUERFANO"]["motivo"],
         f"distingue la factura inexistente: {por_uuid['CP-HUERFANO']['motivo']!r}")
 afirmar(por_uuid["CP-TERMINAL"]["factura_existe"] is True
-        and "Cancelada" in por_uuid["CP-TERMINAL"]["motivo"],
-        f"distingue la factura en estado terminal: {por_uuid['CP-TERMINAL']['motivo']!r}")
+        and "reconciliar" in por_uuid["CP-TERMINAL"]["motivo"],
+        f"la factura que si existe se reporta como vinculable: "
+        f"{por_uuid['CP-TERMINAL']['motivo']!r}")
 
 r = cliente_http.get("/complementos/diagnostico")
 afirmar(r.status_code == 200, f"/diagnostico responde 200 ({r.status_code})")
@@ -294,9 +295,13 @@ print("\n[4] Reconciliar")
 r = cliente_http.post("/complementos/reconciliar")
 afirmar(r.status_code == 200, f"/reconciliar responde 200 ({r.status_code})")
 cuerpo = r.json()
-afirmar(cuerpo["documentos_cp_huerfanos"] == 2,
-        f"el huerfano de factura inexistente y el de estado terminal siguen sin pegarse "
-        f"({cuerpo})")
+# Desde el arreglo del 26/09, reconciliar() vincula tambien las terminales:
+# solo debe quedar huerfano el que apunta a una factura que no existe.
+afirmar(cuerpo["documentos_cp_huerfanos"] == 1,
+        f"reconciliar() pega el pago de la factura Cancelada y deja huerfano "
+        f"solo el de la factura inexistente ({cuerpo})")
+afirmar(cuerpo["documentos_cp_vinculados"] == 2,
+        f"quedan 2 vinculados ({cuerpo})")
 
 db.close()
 

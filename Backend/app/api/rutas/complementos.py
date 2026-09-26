@@ -31,7 +31,7 @@ from app.esquemas.complemento import (
 )
 from app.services.factura_service import (
     reconciliar, reprocesar_fallidos, contar_fallidos_pendientes,
-    MAX_INTENTOS_REPROCESO, ESTADOS_TERMINALES,
+    MAX_INTENTOS_REPROCESO,
 )
 
 router = APIRouter()
@@ -339,13 +339,14 @@ def listar_huerfanos(
     """
     Pagos que el CP declara contra una factura que no quedó vinculada.
 
-    Dos causas distintas, y el campo `motivo` las separa:
+    Desde el arreglo del 26/09/2026, `reconciliar()` vincula un pago con su
+    factura en cualquier estado, así que solo queda una causa real de orfandad:
+    la factura de ese UUID no está en la base. Casi siempre porque Monsort la
+    emitió antes de que el sistema capturara correo, y la vía para traerla es
+    la descarga masiva del SAT.
 
-      · La factura no está en la base. El CP llegó antes que la factura, o la
-        factura entró por el histórico de Excel sin folio fiscal.
-      · La factura sí está, pero en estado terminal (Cancelada, Revisada,
-        Histórico). reconciliar() los excluye a propósito, así que el enlace
-        nunca se va a hacer solo.
+    El campo `motivo` distingue ese caso del transitorio, cuando la factura sí
+    está y solo falta que corra la reconciliación.
     """
     filas = (
         db.query(
@@ -378,16 +379,15 @@ def listar_huerfanos(
         existe = id_factura is not None
 
         if not existe:
-            motivo = "La factura de ese UUID no está en la base"
-        elif estado in ESTADOS_TERMINALES:
             motivo = (
-                f"La factura existe pero está en estado '{estado}'; "
-                "reconciliar() no toca estados terminales"
+                "La factura de ese UUID no está en la base. Se emitió antes de "
+                "que el sistema capturara correo: hay que traerla con la "
+                "descarga masiva del SAT"
             )
         else:
             motivo = (
-                "La factura existe y no está en estado terminal: "
-                "correr /complementos/reconciliar debería vincularla"
+                f"La factura existe (estado '{estado}'): correr "
+                "/complementos/reconciliar debería vincularla"
             )
 
         salida.append(DocumentoHuerfano(

@@ -101,6 +101,35 @@ with motor.begin() as conn:
     conn.execute(text("DELETE FROM alembic_version"))
     conn.execute(text("INSERT INTO alembic_version VALUES ('8aa70d80b90e')"))
 
+    # UUID con caja mezclada y espacios, el caso que dejaba pagos huerfanos.
+    conn.execute(text("""
+        INSERT INTO "Estados" (nombre_estado, descripcion_estado)
+        VALUES ('Historico', 'migrado del excel')
+    """))
+    conn.execute(text("""
+        INSERT INTO "Usuarios" (nombre, correo, password_hash, rol)
+        VALUES ('Sistema Automatico', 'seed@m.test', 'x', 'sistema')
+    """))
+    conn.execute(text("""
+        INSERT INTO "Facturas"
+          (folio_fiscal, rfc, cliente, fecha, moneda, id_usuario, id_estado)
+        SELECT 'ABCD1234-1111-2222-3333-444455556666', 'XAXX010101000', 'DEMO',
+               '2026-03-01', 'MXN', u.id_usuario, e.id_estado
+        FROM "Usuarios" u, "Estados" e
+        WHERE u.correo = 'seed@m.test' AND e.nombre_estado = 'Historico'
+    """))
+    conn.execute(text("""
+        INSERT INTO "ComplementosPago" (uuid_cp, folio, fecha_pago, message_id, cancelado)
+        VALUES ('  ffff9999-8888-7777-6666-555544443333 ', 'CP-CAJA', now(),
+                'MSG-CAJA', false)
+    """))
+    conn.execute(text("""
+        INSERT INTO cp_documentos_relacionados
+          (id_complemento, uuid_documento, num_parcialidad, imp_pagado, imp_saldo_insoluto)
+        SELECT c.id, 'abcd1234-1111-2222-3333-444455556666', 1, 100, 0
+        FROM "ComplementosPago" c WHERE c.uuid_cp LIKE '%ffff9999%'
+    """))
+
     # Dos fallos historicos, como los ~1,700 del VPS.
     conn.execute(text("""
         INSERT INTO "CorreosFallidos" (message_id, error, fecha_fallo, resuelto)
@@ -175,6 +204,33 @@ with motor.connect() as conn:
 
 
 # ─────────────────────────── 4. Lo que antes reventaba
+
+print("\n[3b] Normalizacion de UUID (migracion d7e2b4c9f018)")
+
+with motor.connect() as conn:
+    cp_uuid = conn.execute(text(
+        """SELECT uuid_cp FROM "ComplementosPago" WHERE folio = 'CP-CAJA'"""
+    )).scalar()
+    afirmar(cp_uuid == 'FFFF9999-8888-7777-6666-555544443333',
+            f"uuid_cp normalizado, sin espacios ni minusculas ({cp_uuid!r})")
+
+    doc_uuid = conn.execute(text(
+        "SELECT uuid_documento FROM cp_documentos_relacionados "
+        "WHERE uuid_documento ILIKE 'abcd1234%'"
+    )).scalar()
+    afirmar(doc_uuid == 'ABCD1234-1111-2222-3333-444455556666',
+            f"uuid_documento normalizado ({doc_uuid!r})")
+
+    pegan = conn.execute(text("""
+        SELECT count(*) FROM cp_documentos_relacionados d
+        JOIN "Facturas" f ON f.folio_fiscal = d.uuid_documento
+    """)).scalar()
+    afirmar(pegan == 1,
+            "el pago y su factura YA se encuentran con == despues de normalizar")
+
+    for indice in ("ix_facturas_folio_fiscal", "ix_cp_docs_uuid_documento"):
+        afirmar(indice_existe(conn, indice), f"indice {indice} creado")
+
 
 print("\n[4] Lo que la base prohibia y ahora acepta")
 
@@ -271,7 +327,7 @@ from alembic.migration import MigrationContext
 from alembic.operations import Operations
 import importlib.util
 
-ruta = "alembic/versions/c4f1a9b27d30_arreglo_multidocumento_cp.py"
+ruta = "alembic/versions/d7e2b4c9f018_normaliza_uuid_folio_fiscal.py"
 especificacion = importlib.util.spec_from_file_location("migracion_cp", ruta)
 migracion = importlib.util.module_from_spec(especificacion)
 especificacion.loader.exec_module(migracion)
@@ -287,16 +343,27 @@ with motor.begin() as conn:
             print("   ", e)
 afirmar(repetible, "correr upgrade() dos veces no revienta (es idempotente)")
 
-proceso = subprocess.run(
-    [sys.executable, "-c", "from alembic.config import main; main()", "downgrade", "-1"],
-    capture_output=True, text=True, env={**os.environ},
-)
-if proceso.returncode != 0:
-    print(proceso.stderr[-1500:])
-# Falla a proposito: ya hay dos facturas con el mismo message_id y un CP sin
-# fecha de pago. Revertir sin limpiar primero DEBE fallar.
-afirmar(proceso.returncode != 0,
-        "downgrade se niega mientras existan datos multi-documento (proteccion buscada)")
+def _downgrade_un_paso():
+    return subprocess.run(
+        [sys.executable, "-c", "from alembic.config import main; main()",
+         "downgrade", "-1"],
+        capture_output=True, text=True, env={**os.environ},
+    )
+
+# La normalizacion de UUID si se revierte limpio: solo suelta los indices,
+# los datos normalizados se quedan (no hay registro de la caja original).
+primero = _downgrade_un_paso()
+if primero.returncode != 0:
+    print(primero.stderr[-1500:])
+afirmar(primero.returncode == 0,
+        "downgrade de la normalizacion de UUID pasa sin problema")
+
+# La de constraints NO: ya hay dos facturas con el mismo message_id y un CP
+# sin fecha de pago. Revertir sin limpiar primero DEBE fallar.
+segundo = _downgrade_un_paso()
+afirmar(segundo.returncode != 0,
+        "downgrade de los constraints se niega mientras existan datos "
+        "multi-documento (proteccion buscada)")
 
 print()
 if fallos:

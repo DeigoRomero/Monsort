@@ -5,11 +5,13 @@ import { FacturasRecibidas } from "./FacturasRecibidas";
 import { OrdenesCompra } from "./OrdenesCompra";
 import { Clientes } from "./Clientes";
 import { Register } from "./Register";
+import { Complementos } from "./Complementos";
 import "./Dashboard.css";
 
 type Vista =
   | "facturas-emitidas"
   | "facturas-recibidas"
+  | "complementos"
   | "ordenes"
   | "clientes"
   | "crear-usuario";
@@ -64,6 +66,12 @@ export function Dashboard() {
             Facturas emitidas
           </button>
           <button
+            className={`dashboard-nav-item${vista === "complementos" ? " active" : ""}`}
+            onClick={() => setVista("complementos")}
+          >
+            Complementos de pago
+          </button>
+          <button
             className={`dashboard-nav-item${vista === "ordenes" ? " active" : ""}`}
             onClick={() => setVista("ordenes")}
           >
@@ -81,6 +89,7 @@ export function Dashboard() {
       <main className="dashboard-main">
         {vista === "facturas-recibidas" && <Facturas />}
         {vista === "facturas-emitidas" && <FacturasRecibidas />}
+        {vista === "complementos" && <Complementos />}
         {vista === "ordenes" && <OrdenesCompra />}
         {vista === "clientes" && <Clientes />}
         {vista === "crear-usuario" && (

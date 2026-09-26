@@ -3,7 +3,9 @@ import logging
 from apscheduler.schedulers.background import BackgroundScheduler
 
 from app.BaseDeDatos import SessionLocal
-from app.services.factura_service import procesar_correos_nuevos
+from app.services.factura_service import (
+    procesar_correos_nuevos, reprocesar_fallidos, contar_fallidos_pendientes,
+)
 from app.services.verificacion_service import verificar_lote
 from app.services.descarga_masiva_service import avanzar_solicitudes, crear_solicitud_ventana_movil
 from app.services.verificacion_recibidas_service import verificar_lote_recibidas
@@ -18,6 +20,28 @@ def job_procesar_correos():
         procesar_correos_nuevos(db)
     except Exception:
         logger.exception("Error en el job de procesar correos")
+    finally:
+        db.close()
+
+
+def job_reprocesar_fallidos():
+    """
+    Drena la cola de CorreosFallidos de a poco.
+
+    Al 26/09/2026 había ~1,700 correos caídos, casi todos por un 403 de cuota
+    de Gmail en una llamada que no tenía reintentos. A 40 por ciclo cada 10
+    minutos la cola se vacía en unas 7 horas sin volver a saturar la API.
+    """
+    db = SessionLocal()
+    try:
+        pendientes = contar_fallidos_pendientes(db)
+        if not pendientes:
+            return
+
+        logger.info("Reproceso de correos: %d pendiente(s) en cola", pendientes)
+        reprocesar_fallidos(db, limite=40)
+    except Exception:
+        logger.exception("Error en el job de reproceso de correos fallidos")
     finally:
         db.close()
 
@@ -109,6 +133,15 @@ scheduler.add_job(
     "interval",
     minutes=5,
     id="procesar_correos",
+    max_instances=1,
+    coalesce=True,
+)
+
+scheduler.add_job(
+    job_reprocesar_fallidos,
+    "interval",
+    minutes=10,
+    id="reprocesar_fallidos",
     max_instances=1,
     coalesce=True,
 )

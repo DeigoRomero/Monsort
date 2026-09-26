@@ -7,7 +7,8 @@ class Facturas(Base):
     __tablename__ = "Facturas"
 
     id_factura = Column(Integer, primary_key=True, index=True, autoincrement=True)
-    message_id = Column(String, unique=True, nullable=True)
+    # NO unique: un correo puede traer varias facturas. El dedupe es folio_fiscal.
+    message_id = Column(String, nullable=True, index=True)
     folio_fiscal = Column(String, nullable=False)
     rfc = Column(String, nullable=False)
     cliente = Column(String, nullable=True)

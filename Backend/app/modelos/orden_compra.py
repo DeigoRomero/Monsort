@@ -13,7 +13,9 @@ class OrdenesCompra(Base):
     archivo = Column(LargeBinary, nullable=True)
     nombre_archivo = Column(String, nullable=True)
     
-    message_id = Column(String, unique=True, nullable=False)  # ID de Gmail
+    # NO unique: un correo puede traer varias OCs sueltas. El dedupe es
+    # hash_archivo, que si sigue siendo unique mas abajo.
+    message_id = Column(String, nullable=False, index=True)  # ID de Gmail
     fecha_recepcion = Column(DateTime, default=datetime.now)
     
     capturada_por = Column(Integer, ForeignKey("Usuarios.id_usuario"), nullable=True)

@@ -12,13 +12,56 @@ import time
 logger = logging.getLogger(__name__)
 
 TIPOS_ADJUNTO = ('application/pdf', 'application/xml', 'text/xml',
-                 'application/octet-stream')
+                 'application/octet-stream',
+                 'application/zip', 'application/x-zip-compressed')
+
+EXTENSIONES_RELEVANTES = ('.pdf', '.xml', '.zip')
 
 # Gmail cobra cuota por llamada y cada adjunto es una llamada aparte.
 # Un correo con doce adjuntos agota el limite por minuto sin pausa.
 PAUSA_ENTRE_ADJUNTOS = 0.3
 INTENTOS_ADJUNTO = 4
 ESTADOS_TRANSITORIOS = (403, 429, 500, 502, 503, 504)
+
+# 404 = el mensaje ya no existe (borrado, purgado de la papelera). Reintentar
+# no lo revive: se marca como permanente para que el job de reproceso no
+# gaste cuota en el.
+ESTADOS_PERMANENTES = (400, 404)
+
+
+def es_error_permanente(excepcion: Exception) -> bool:
+    """True si reintentar este error de Gmail no puede cambiar el resultado."""
+    resp = getattr(excepcion, "resp", None)
+    estado = getattr(resp, "status", None)
+    return estado in ESTADOS_PERMANENTES
+
+
+def _con_reintentos(operacion, descripcion: str):
+    """
+    Ejecuta una llamada a Gmail reintentando ante errores transitorios.
+
+    NO captura el fallo final a proposito: la excepcion debe llegar hasta
+    procesar_correos_nuevos() para que el correo quede en CorreosFallidos y
+    se pueda reprocesar. Tragarse el error aqui significaria marcar el correo
+    como procesado con datos faltantes, y como el historyId ya avanzo, esa
+    factura se perderia para siempre.
+    """
+    for intento in range(INTENTOS_ADJUNTO):
+        try:
+            return operacion()
+
+        except HttpError as error:
+            ultimo = intento == INTENTOS_ADJUNTO - 1
+            if error.resp.status not in ESTADOS_TRANSITORIOS or ultimo:
+                raise
+
+            espera = 2 ** intento      # 1, 2, 4 segundos
+            logger.warning(
+                "Gmail %s en %s. Reintento %d/%d en %ds",
+                error.resp.status, descripcion,
+                intento + 1, INTENTOS_ADJUNTO - 1, espera,
+            )
+            time.sleep(espera)
 
 
 def obtener_servicio_gmail(db: Session | None = None):
@@ -137,36 +180,14 @@ def obtener_mensajes_nuevos(db: Session, servicio=None):
 
 
 def _descargar_adjunto(servicio, message_id, adjunto_id, nombre):
-    """
-    Descarga un adjunto reintentando ante errores transitorios.
+    """Descarga un adjunto reintentando ante errores transitorios."""
+    def operacion():
+        adj = servicio.users().messages().attachments().get(
+            userId='me', messageId=message_id, id=adjunto_id
+        ).execute()
+        return base64.urlsafe_b64decode(adj['data'])
 
-    NO captura el fallo final a proposito: si el adjunto no se puede
-    bajar, la excepcion debe llegar hasta procesar_correos_nuevos() para
-    que el correo caiga en CorreosFallidos y se pueda reprocesar.
-
-    Tragarse el error aqui significaria marcar el correo como procesado
-    con adjuntos faltantes, y como el historyId ya avanzo, esa factura
-    se perderia para siempre.
-    """
-    for intento in range(INTENTOS_ADJUNTO):
-        try:
-            adj = servicio.users().messages().attachments().get(
-                userId='me', messageId=message_id, id=adjunto_id
-            ).execute()
-            return base64.urlsafe_b64decode(adj['data'])
-
-        except HttpError as error:
-            ultimo = intento == INTENTOS_ADJUNTO - 1
-            if error.resp.status not in ESTADOS_TRANSITORIOS or ultimo:
-                raise
-
-            espera = 2 ** intento      # 1, 2, 4 segundos
-            logger.warning(
-                "Gmail %s al bajar %s de %s. Reintento %d/%d en %ds",
-                error.resp.status, nombre, message_id,
-                intento + 1, INTENTOS_ADJUNTO - 1, espera,
-            )
-            time.sleep(espera)
+    return _con_reintentos(operacion, f"bajar {nombre} de {message_id}")
 
 
 def _recorrer_partes(servicio, message_id, partes, adjuntos):
@@ -195,7 +216,7 @@ def _recorrer_partes(servicio, message_id, partes, adjuntos):
         # Sin esto se pierden facturas legitimas.
         es_relevante = (
             mime in TIPOS_ADJUNTO
-            or nombre.lower().endswith(('.pdf', '.xml'))
+            or nombre.lower().endswith(EXTENSIONES_RELEVANTES)
         )
         if not es_relevante:
             continue
@@ -214,9 +235,16 @@ def _recorrer_partes(servicio, message_id, partes, adjuntos):
 
 def extraer_adjuntos(servicio, message_id):
     """Devuelve ({nombre: bytes}, asunto). Recorre todo el arbol MIME."""
-    mensaje = servicio.users().messages().get(
-        userId='me', id=message_id, format='full'
-    ).execute()
+    # ESTA es la llamada que tiraba ~1,700 correos entre el 11 y el 26 de
+    # septiembre de 2026: los adjuntos tenian backoff y este get no, asi que
+    # un 403 por cuota bastaba para dar el correo por perdido. Blindar la
+    # bodega y dejar el porton abierto.
+    mensaje = _con_reintentos(
+        lambda: servicio.users().messages().get(
+            userId='me', id=message_id, format='full'
+        ).execute(),
+        f"leer mensaje {message_id}",
+    )
 
     payload = mensaje.get('payload', {})
 

@@ -11,7 +11,10 @@ class ComplementosPago(Base):
     uuid_cp = Column(String, unique=True, nullable=False)     # folio fiscal del CP
     folio = Column(String, nullable=True)                     # ej. "CP576"
 
-    fecha_pago = Column(DateTime, nullable=False)
+    # nullable: un CP cuyo nodo Pago no se pudo parsear (namespace Pagos10,
+    # XML fuera de norma) se guarda igual para revision manual. Antes era
+    # NOT NULL y el correo completo se iba al rollback.
+    fecha_pago = Column(DateTime, nullable=True)
     moneda = Column(String(10), nullable=True)
     tipo_cambio = Column(Numeric(10, 4), nullable=True)
     monto = Column(Numeric(12, 2), nullable=True)
@@ -20,9 +23,11 @@ class ComplementosPago(Base):
     archivo_xml = Column(LargeBinary, nullable=True)
     archivo_pdf = Column(LargeBinary, nullable=True)
 
-    message_id = Column(String, unique=True, nullable=False)
+    # NO unique: un correo puede traer varios CPs. El dedupe es uuid_cp.
+    message_id = Column(String, nullable=False, index=True)
     fecha_recepcion = Column(DateTime, default=datetime.now)
-    hash_archivo = Column(String(64), unique=True, nullable=True)
+    # NO unique: el hash del PDF no identifica al documento fiscal, uuid_cp si.
+    hash_archivo = Column(String(64), nullable=True, index=True)
 
     # Cancelación administrativa
     cancelado = Column(Boolean, nullable=False, default=False)

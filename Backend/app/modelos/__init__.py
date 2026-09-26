@@ -9,3 +9,4 @@ from app.modelos.correo_procesado import CorreosProcesados, CorreosFallidos
 from app.modelos.cliente import Cliente
 from app.modelos.solicitud_sat import SolicitudesSAT
 from app.modelos.facturas_recibidas import FacturasRecibidas
+from app.modelos.metadata_emitida import MetadataEmitidas

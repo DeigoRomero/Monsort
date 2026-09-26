@@ -12,6 +12,7 @@ from app.api.rutas.clientes import router as ClienteRouter
 from app.api.rutas.auth_gmail import router as AuthGmailRouter
 from app.api.rutas.facturas_recibidas import router as FacturaRecibidaRouter
 from app.api.rutas.complementos import router as ComplementoRouter
+from app.api.rutas.sat import router as SatRouter
 from app.modelos import usuario, factura, estados
 from app.core.scheduler import scheduler
 from app.core.config import Settings
@@ -63,3 +64,4 @@ aplicacion.include_router(ClienteRouter, prefix="/clientes", tags=["Clientes"])
 aplicacion.include_router(AuthGmailRouter, prefix="/auth", tags=["Autenticación Gmail"])
 aplicacion.include_router(FacturaRecibidaRouter, prefix="/facturas-recibidas", tags=["Facturas recibidas"])
 aplicacion.include_router(ComplementoRouter, prefix="/complementos", tags=["Complementos de pago"])
+aplicacion.include_router(SatRouter, prefix="/sat", tags=["Reconciliación SAT"])

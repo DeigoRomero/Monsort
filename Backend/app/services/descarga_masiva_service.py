@@ -415,7 +415,11 @@ def _paso_descargar(db: Session, solicitud, cliente: ClienteSAT) -> str:
             if rechazos:
                 solicitud.error_ingesta = rechazos
         elif solicitud.tipo_solicitud == TIPO_METADATA:
-            nuevos, duplicados = ingerir_metadata(db, respuesta.contenido)
+            nuevos, duplicados, rechazos = ingerir_metadata(
+                db, respuesta.contenido, solicitud.id
+            )
+            if rechazos:
+                solicitud.error_ingesta = rechazos
         else:
             nuevos, duplicados = ingerir_cfdi(db, respuesta.contenido)
     except Exception as error:  # noqa: BLE001
@@ -450,41 +454,29 @@ def _paso_descargar(db: Session, solicitud, cliente: ClienteSAT) -> str:
 # Ingesta
 # ---------------------------------------------------------------------------
 
-def ingerir_metadata(db: Session, contenido_zip: bytes) -> tuple[int, int]:
+def ingerir_metadata(
+    db: Session,
+    contenido_zip: bytes,
+    id_solicitud: int | None = None,
+) -> tuple[int, int, str]:
     """
-    El paquete de metadata trae un unico .txt delimitado por '~', con
-    encabezado. NO es XML.
+    Metadata de EMITIDAS: se guarda en MetadataEmitidas.
 
-    De momento solo se contabiliza y se registra: la metadata sirve para
-    saber que comprobantes existen y su estatus, pero no trae los datos
-    completos de la factura. La ingesta real va con tipo 'cfdi'.
+    Antes esta funcion contaba los UUID contra Facturas y tiraba el archivo.
+    El TXT trae la FechaEmision de cada comprobante, y sin guardarla no habia
+    forma de saber de que mes es una factura ausente cuyo pago (CP) si llego:
+    un UUID no lleva fecha adentro.
+
+    Guardarla convierte la metadata en el indice barato del SAT: su solicitud
+    no consume el limite de por vida, a diferencia de las de tipo 'cfdi'. Con
+    el indice se localiza el mes y se gasta UNA solicitud precisa en lugar de
+    adivinar el rango.
+
+    Devuelve (nuevas, actualizadas, texto_rechazos).
     """
-    nuevos = 0
-    conocidos = 0
+    from app.services.ingesta_emitidas_service import ingerir_metadata_emitidas
 
-    from app.modelos.factura import Facturas
-
-    with zipfile.ZipFile(io.BytesIO(contenido_zip)) as paquete:
-        for nombre in paquete.namelist():
-            texto = paquete.read(nombre).decode("utf-8", errors="replace")
-            lector = csv.DictReader(io.StringIO(texto), delimiter="~")
-
-            for fila in lector:
-                uuid = (fila.get("Uuid") or "").strip()
-                if not uuid:
-                    continue
-
-                existe = (
-                    db.query(Facturas.id_factura)
-                    .filter(Facturas.folio_fiscal == uuid)
-                    .first()
-                )
-                if existe:
-                    conocidos += 1
-                else:
-                    nuevos += 1
-
-    return nuevos, conocidos
+    return ingerir_metadata_emitidas(db, contenido_zip, id_solicitud)
 
 
 def ingerir_cfdi(db: Session, contenido_zip: bytes) -> tuple[int, int]:

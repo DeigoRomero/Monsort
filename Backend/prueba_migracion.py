@@ -343,25 +343,27 @@ with motor.begin() as conn:
             print("   ", e)
 afirmar(repetible, "correr upgrade() dos veces no revienta (es idempotente)")
 
-def _downgrade_un_paso():
+def _downgrade(destino: str):
     return subprocess.run(
         [sys.executable, "-c", "from alembic.config import main; main()",
-         "downgrade", "-1"],
+         "downgrade", destino],
         capture_output=True, text=True, env={**os.environ},
     )
 
-# La normalizacion de UUID si se revierte limpio: solo suelta los indices,
-# los datos normalizados se quedan (no hay registro de la caja original).
-primero = _downgrade_un_paso()
-if primero.returncode != 0:
-    print(primero.stderr[-1500:])
-afirmar(primero.returncode == 0,
-        "downgrade de la normalizacion de UUID pasa sin problema")
 
-# La de constraints NO: ya hay dos facturas con el mismo message_id y un CP
-# sin fecha de pago. Revertir sin limpiar primero DEBE fallar.
-segundo = _downgrade_un_paso()
-afirmar(segundo.returncode != 0,
+# Bajar hasta la migracion de constraints. Los pasos intermedios (metadata de
+# emitidas, normalizacion de UUID) revierten limpio. Se nombra la revision en
+# vez de contar pasos: asi agregar migraciones despues no rompe la prueba.
+hasta_constraints = _downgrade("c4f1a9b27d30")
+if hasta_constraints.returncode != 0:
+    print(hasta_constraints.stderr[-1500:])
+afirmar(hasta_constraints.returncode == 0,
+        "downgrade hasta c4f1a9b27d30 pasa sin problema")
+
+# De ahi ya no se puede bajar: hay dos facturas con el mismo message_id y un
+# CP sin fecha de pago. Revertir sin limpiar primero DEBE fallar.
+un_paso_mas = _downgrade("-1")
+afirmar(un_paso_mas.returncode != 0,
         "downgrade de los constraints se niega mientras existan datos "
         "multi-documento (proteccion buscada)")
 

@@ -17,10 +17,28 @@ from decimal import Decimal, InvalidOperation
 logger = logging.getLogger(__name__)
 
 
-# RFC del cliente. Toda fila con otro receptor se rechaza: significa que
-# la solicitud se armo mal y es preferible enterarse por el contador de
-# rechazos que por una factura ajena en el dashboard.
-RFC_RECEPTOR_ESPERADO = "MSF140227BF7"
+# RFC del cliente. Toda fila donde Monsort no aparezca en el papel esperado
+# se rechaza: significa que la solicitud se armo mal, y es preferible
+# enterarse por el contador de rechazos que por una factura ajena en el
+# dashboard.
+#
+# El mismo TXT sirve para las dos direcciones, solo cambia en que columna
+# debe estar el RFC de Monsort:
+#
+#   rol="receptor"  recibidas  -> un proveedor le emitio a Monsort
+#   rol="emisor"    emitidas   -> Monsort le emitio a un cliente
+#
+# Por eso se parametriza en vez de duplicar el parser: el layout, el
+# separador, el BOM y el mapeo de estatus son identicos.
+RFC_RECEPTOR_ESPERADO = "MSF140227BF7"   # se conserva por compatibilidad
+
+ROL_RECEPTOR = "receptor"
+ROL_EMISOR = "emisor"
+
+COLUMNA_POR_ROL = {
+    ROL_RECEPTOR: "rfc_receptor",
+    ROL_EMISOR: "rfc_emisor",
+}
 
 # Encabezado del SAT -> nombre de columna en FacturasRecibidas.
 #
@@ -153,8 +171,11 @@ def _parsear_linea(linea: str, separador: str, indices: dict[str, int]) -> dict:
     }
 
 
-def _validar(fila: dict) -> str | None:
+def _validar(fila: dict, rol: str = ROL_RECEPTOR, rfc_propio: str | None = None) -> str | None:
     """Devuelve el motivo de rechazo, o None si la fila es valida."""
+    rfc_propio = (rfc_propio or RFC_RECEPTOR_ESPERADO).upper()
+    columna_rfc = COLUMNA_POR_ROL[rol]
+
     if not fila["folio_fiscal"]:
         return "Sin folio fiscal"
 
@@ -169,26 +190,41 @@ def _validar(fila: dict) -> str | None:
         # disfrazada de buena en la vista del cliente.
         return f"Estatus desconocido: {fila['_estatus_crudo']!r}"
 
-    if fila["rfc_receptor"] != RFC_RECEPTOR_ESPERADO:
+    if fila[columna_rfc] != rfc_propio:
         return (
-            f"Receptor inesperado {fila['rfc_receptor']!r} "
-            f"(se esperaba {RFC_RECEPTOR_ESPERADO})"
+            f"{rol.capitalize()} inesperado {fila[columna_rfc]!r} "
+            f"(se esperaba {rfc_propio})"
         )
 
     return None
 
 
-def parsear_metadata(contenido_zip: bytes) -> tuple[list[dict], list[dict]]:
+def parsear_metadata(
+    contenido_zip: bytes,
+    rol: str = ROL_RECEPTOR,
+    rfc_propio: str | None = None,
+) -> tuple[list[dict], list[dict]]:
     """
     Devuelve (filas_validas, filas_rechazadas).
 
     filas_validas:     dicts listos para la ingesta, con los nombres de
-                       columna de FacturasRecibidas.
+                       columna de FacturasRecibidas / MetadataEmitidas
+                       (comparten los nombres a proposito).
     filas_rechazadas:  [{'linea': str, 'motivo': str, 'archivo': str}, ...]
                        para alimentar SolicitudesSAT.error_ingesta.
 
+    rol:         "receptor" para recibidas (Monsort recibe), "emisor" para
+                 emitidas (Monsort emite). Decide en que columna se exige el
+                 RFC de Monsort. El default conserva el comportamiento previo.
+    rfc_propio:  el RFC de Monsort. Si no se pasa, usa la constante del
+                 modulo, para que el parser siga siendo probable sin cargar
+                 la configuracion.
+
     No toca la base de datos.
     """
+    if rol not in COLUMNA_POR_ROL:
+        raise ValueError(f"rol invalido: {rol!r}. Use {list(COLUMNA_POR_ROL)}")
+
     validas: list[dict] = []
     rechazadas: list[dict] = []
 
@@ -224,7 +260,7 @@ def parsear_metadata(contenido_zip: bytes) -> tuple[list[dict], list[dict]]:
                     })
                     continue
 
-                motivo = _validar(fila)
+                motivo = _validar(fila, rol, rfc_propio)
                 if motivo:
                     rechazadas.append({
                         "linea": linea[:300],
@@ -237,7 +273,7 @@ def parsear_metadata(contenido_zip: bytes) -> tuple[list[dict], list[dict]]:
                 validas.append(fila)
 
     logger.info(
-        "Metadata parseada: %d validas, %d rechazadas",
-        len(validas), len(rechazadas),
+        "Metadata parseada (%s): %d validas, %d rechazadas",
+        rol, len(validas), len(rechazadas),
     )
     return validas, rechazadas

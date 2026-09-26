@@ -341,12 +341,12 @@ def listar_huerfanos(
 
     Desde el arreglo del 26/09/2026, `reconciliar()` vincula un pago con su
     factura en cualquier estado, así que solo queda una causa real de orfandad:
-    la factura de ese UUID no está en la base. Casi siempre porque Monsort la
-    emitió antes de que el sistema capturara correo, y la vía para traerla es
-    la descarga masiva del SAT.
+    la factura de ese UUID no está en la base.
 
-    El campo `motivo` distingue ese caso del transitorio, cuando la factura sí
-    está y solo falta que corra la reconciliación.
+    El porqué no se adivina desde aquí — puede ser un correo que se perdió, una
+    factura ausente del histórico del Excel, o una emitida antes de que el
+    sistema existiera. `GET /sat/uuid/{folio}` lo contesta con datos: dice si el
+    SAT la registra y de qué mes es.
     """
     filas = (
         db.query(
@@ -379,10 +379,15 @@ def listar_huerfanos(
         existe = id_factura is not None
 
         if not existe:
+            # Sin afirmar la causa: el 26/09/2026 el texto decía "se emitió
+            # antes de que el sistema capturara correo", y dejó de ser cierto
+            # en cuanto el reproceso completó septiembre. Puede ser eso, o un
+            # correo borrado del buzón, o una factura ausente del Excel
+            # histórico. /sat/uuid/{folio} lo contesta con datos.
             motivo = (
-                "La factura de ese UUID no está en la base. Se emitió antes de "
-                "que el sistema capturara correo: hay que traerla con la "
-                "descarga masiva del SAT"
+                "La factura de ese UUID no está en la base. Consultar "
+                f"/sat/uuid/{doc.uuid_documento} para saber si el SAT la "
+                "registra y de qué mes es"
             )
         else:
             motivo = (

@@ -269,6 +269,33 @@ else:
             and "no hace falta" in hallazgo_b["recomendacion"],
             "para una que si tenemos, dice que no hay que pedir nada")
 
+    # El caso que me confundio: consultar el folio de un CP en vez del de la
+    # factura. Los dos son UUID de 36 caracteres y se ven identicos.
+    from app.modelos.complemento_pago import ComplementosPago
+    from app.modelos.cp_documento_relacionado import CPDocumentosRelacionados
+
+    cp = ComplementosPago(
+        uuid_cp="CPCPCPCP-1111-2222-3333-444444444444", folio="CP-777",
+        fecha_pago=datetime(2026, 9, 20), moneda="MXN", tipo_cambio=1,
+        monto=1160, message_id="MSG-CP777", cancelado=False,
+    )
+    db_pg.add(cp)
+    db_pg.commit()
+    db_pg.add(CPDocumentosRelacionados(
+        id_complemento=cp.id,
+        uuid_documento="EEEEEEEE-1111-2222-3333-444444444444",
+        num_parcialidad=1, imp_pagado=1160, imp_saldo_insoluto=0, id_factura=None,
+    ))
+    db_pg.commit()
+
+    confusion = buscar_uuid(db_pg, "CPCPCPCP-1111-2222-3333-444444444444")
+    afirmar(confusion["es_complemento_pago"] is True,
+            "detecta que el UUID consultado es de un CP, no de una factura")
+    afirmar(confusion["facturas_que_paga"] == ["EEEEEEEE-1111-2222-3333-444444444444"],
+            f"y lista las facturas que ese CP paga ({confusion['facturas_que_paga']})")
+    afirmar("COMPLEMENTO DE PAGO" in confusion["recomendacion"],
+            f"lo dice claro: {confusion['recomendacion'][:60]!r}")
+
     hallazgo_x = buscar_uuid(db_pg, "99999999-9999-9999-9999-999999999999")
     afirmar(hallazgo_x["en_facturas"] is False
             and hallazgo_x["en_metadata_sat"] is False

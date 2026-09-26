@@ -165,8 +165,31 @@ def crear_solicitud(
         )
         return duplicada
 
+    # El SAT rechaza cualquier fecha_final que no haya ocurrido todavia en
+    # hora de Mexico, con "Fecha final invalida". Aqui se recorta en vez de
+    # dejar que la solicitud nazca muerta.
+    #
+    # Es el mismo bug que tumbo las solicitudes #52 a #57 (reloj del VPS en
+    # UTC devolviendo la fecha de manana) y despues la #61, que pidio todo
+    # septiembre estando a dia 26. El arreglo de _hoy_mexico() se habia
+    # aplicado solo a crear_solicitud_ventana_movil(); se pone aqui para que
+    # cubra tambien --crear-mes y --crear-anio, que pasan por esta funcion.
+    hoy = _hoy_mexico()
+    if fecha_final > hoy:
+        logger.warning(
+            "fecha_final %s aun no ocurre (hoy en Mexico es %s). Se recorta: "
+            "el SAT rechazaria el rango completo. Vuelve a pedir el mes cuando "
+            "termine para cubrir los dias que faltan.",
+            fecha_final, hoy,
+        )
+        fecha_final = hoy
+
     if fecha_inicial > fecha_final:
-        raise ValueError("fecha_inicial no puede ser mayor que fecha_final")
+        raise ValueError(
+            f"fecha_inicial {fecha_inicial} es posterior a fecha_final "
+            f"{fecha_final}. Si pediste un mes que todavia no empieza, espera "
+            "a que corra."
+        )
 
     solicitud = SolicitudesSAT(
         fecha_inicial=fecha_inicial,
@@ -323,9 +346,26 @@ def _paso_verificar(db: Session, solicitud, cliente: ClienteSAT) -> str:
     solicitud.mensaje_sat = respuesta.mensaje
 
     if not respuesta.exitoso:
+        # Se registra SIEMPRE. Sin esto, una solicitud puede quemar sus 100
+        # intentos de verificacion sin dejar una sola linea en el log: el
+        # mensaje del SAT quedaba solo en la base, y para verlo habia que
+        # consultarla a mano. Es el agujero que obligo a diagnosticar con SQL
+        # el incidente del 26/09/2026.
+        logger.warning(
+            "Solicitud %s: verificacion sin exito (intento %d/%d). "
+            "codigo=%s estado_sat=%s mensaje=%s",
+            solicitud.id_solicitud_sat,
+            solicitud.intentos_verificacion, MAX_INTENTOS_VERIFICACION,
+            respuesta.codigo_estatus, respuesta.estado_solicitud,
+            respuesta.mensaje,
+        )
         if solicitud.intentos_verificacion >= MAX_INTENTOS_VERIFICACION:
             solicitud.estado = FALLIDA
             solicitud.fecha_completada = _ahora()
+            logger.error(
+                "Solicitud %s agoto los %d intentos sin respuesta exitosa del SAT",
+                solicitud.id_solicitud_sat, MAX_INTENTOS_VERIFICACION,
+            )
             return FALLIDA
         return solicitud.estado
 
@@ -365,11 +405,22 @@ def _paso_verificar(db: Session, solicitud, cliente: ClienteSAT) -> str:
         solicitud.estado = FALLIDA
         solicitud.fecha_completada = _ahora()
         logger.error(
-            "Solicitud %s agoto los %d intentos de verificacion",
+            "Solicitud %s agoto los %d intentos de verificacion. Ultimo estado "
+            "del SAT: %s (%s). Es el patron de las solicitudes #50 y #51: el "
+            "SAT acepta y nunca prepara el paquete.",
             solicitud.id_solicitud_sat, MAX_INTENTOS_VERIFICACION,
+            respuesta.estado_solicitud, respuesta.mensaje,
         )
         return FALLIDA
 
+    # En curso es lo normal: el SAT tarda de minutos a horas. Se registra en
+    # info para poder seguir el avance sin entrar a la base.
+    logger.info(
+        "Solicitud %s en curso (intento %d/%d): estado del SAT %s (%s)",
+        solicitud.id_solicitud_sat,
+        solicitud.intentos_verificacion, MAX_INTENTOS_VERIFICACION,
+        respuesta.estado_solicitud, respuesta.mensaje,
+    )
     solicitud.estado = EN_PROCESO
     return EN_PROCESO
 

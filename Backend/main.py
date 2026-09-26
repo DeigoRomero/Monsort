@@ -1,3 +1,4 @@
+import logging
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
@@ -16,6 +17,33 @@ from app.api.rutas.sat import router as SatRouter
 from app.modelos import usuario, factura, estados
 from app.core.scheduler import scheduler
 from app.core.config import Settings
+
+# ---------------------------------------------------------------------------
+# Logging de la aplicación
+#
+# Sin esto, TODO logger.info del proyecto se descarta en produccion. Un logger
+# sin nivel propio hereda del root, cuyo default es WARNING, y el
+# --log-level info de uvicorn solo configura los loggers de uvicorn. Por eso
+# los logger.warning y logger.error si aparecian en journalctl y los
+# logger.info no: el resumen de cada ciclo de correos, el del reproceso, el
+# "Paquete X ingerido" de la descarga masiva y los avisos de ZIP eran
+# invisibles. El CLI de descarga_masiva_service si los mostraba porque su
+# main() llama a logging.basicConfig() a mano.
+#
+# Se configura el logger "app" y no el root: todos los modulos del proyecto
+# usan logging.getLogger(__name__), que bajo app/ da "app.services.x" y
+# "app.core.x". Asi no se pelea con la configuracion de uvicorn ni se
+# duplican sus logs de acceso.
+_logger_app = logging.getLogger("app")
+if not _logger_app.handlers:
+    _manejador = logging.StreamHandler()
+    _manejador.setFormatter(
+        logging.Formatter("%(levelname)-8s %(name)s: %(message)s")
+    )
+    _logger_app.addHandler(_manejador)
+_logger_app.setLevel(logging.INFO)
+# propagate=False para que no salga dos veces si alguien configura el root.
+_logger_app.propagate = False
 
 # Una sola instancia: aquí es donde se lee el .env
 settings = Settings()

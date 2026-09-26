@@ -254,13 +254,21 @@ def faltantes(
 
 def buscar_uuid(db: Session, folio_fiscal: str) -> dict:
     """
-    Todo lo que se sabe de un UUID, en los tres lugares donde puede estar.
+    Todo lo que se sabe de un UUID, en los lugares donde puede estar.
 
     Es la consulta que resuelve un pago huerfano: dice si el SAT conoce esa
     factura, de que mes es, y si ya la tenemos.
+
+    Detecta a proposito el caso de confundir el UUID de un complemento de pago
+    con el de la factura que paga. Los dos son folios fiscales de 36
+    caracteres y se ven identicos; el del CP no sirve para pedir la factura al
+    SAT. Paso en la primera consulta real, el 26/09/2026, y sin aviso el
+    resultado ("no esta en ningun lado") parece un hallazgo cuando en realidad
+    es una pregunta mal hecha.
     """
     from app.modelos.factura import Facturas
     from app.modelos.metadata_emitida import MetadataEmitidas
+    from app.modelos.complemento_pago import ComplementosPago
     from app.modelos.cp_documento_relacionado import CPDocumentosRelacionados
     from app.services.factura_service import normalizar_uuid
 
@@ -274,7 +282,28 @@ def buscar_uuid(db: Session, folio_fiscal: str) -> dict:
         CPDocumentosRelacionados.uuid_documento == uuid
     ).scalar() or 0
 
-    if factura:
+    # ¿Es el folio de un CP en vez del de una factura?
+    complemento = db.query(ComplementosPago).filter(
+        ComplementosPago.uuid_cp == uuid
+    ).first()
+
+    facturas_que_paga = []
+    if complemento:
+        facturas_que_paga = [
+            fila[0] for fila in db.query(CPDocumentosRelacionados.uuid_documento)
+            .filter(CPDocumentosRelacionados.id_complemento == complemento.id)
+            .all()
+        ]
+
+    if complemento:
+        listado = ", ".join(facturas_que_paga) if facturas_que_paga else "ninguna"
+        recomendacion = (
+            "Ese UUID es de un COMPLEMENTO DE PAGO "
+            f"(folio {complemento.folio or 's/f'}), no de una factura. "
+            f"Las facturas que paga son: {listado}. "
+            "Consultar cada una de esas para saber si el SAT las registra"
+        )
+    elif factura:
         recomendacion = "La factura ya esta en la base; no hace falta pedir nada al SAT"
     elif meta:
         recomendacion = (
@@ -292,6 +321,8 @@ def buscar_uuid(db: Session, folio_fiscal: str) -> dict:
         "en_facturas": factura is not None,
         "en_metadata_sat": meta is not None,
         "pagos_que_la_referencian": pagos,
+        "es_complemento_pago": complemento is not None,
+        "facturas_que_paga": facturas_que_paga,
         "fecha_emision_sat": meta.fecha_emision if meta else None,
         "monto_sat": meta.monto_total if meta else None,
         "receptor_sat": meta.nombre_receptor if meta else None,

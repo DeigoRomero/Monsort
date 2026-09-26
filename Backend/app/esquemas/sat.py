@@ -37,6 +37,12 @@ class BusquedaUuid(BaseModel):
     en_metadata_sat: bool
     pagos_que_la_referencian: int
 
+    # El folio de un CP y el de una factura se ven identicos (36 caracteres).
+    # Si el UUID consultado es de un complemento, esto lo dice y lista las
+    # facturas que ese CP paga, que son las que hay que consultar en realidad.
+    es_complemento_pago: bool = False
+    facturas_que_paga: list[str] = []
+
     fecha_emision_sat: datetime | None = None
     monto_sat: Decimal | None = None
     receptor_sat: str | None = None

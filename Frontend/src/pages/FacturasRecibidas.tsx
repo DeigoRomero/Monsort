@@ -128,8 +128,7 @@ export function FacturasRecibidas() {
       <div className="facturas-header">
         <div>
         <p className="facturas-eyebrow">Del SAT · Descarga Masiva</p>
-        <h2 className="facturas-title">Facturas emitidas</h2>
-        </div>
+        <h2 className="facturas-title">Facturas recibidas</h2>        </div>
         <div style={{ display: "flex", gap: 10 }}>
           <button
             className="factura-btn-secondary"

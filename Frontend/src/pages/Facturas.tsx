@@ -181,9 +181,8 @@ export function Facturas() {
     <div className="facturas-panel">
       <div className="facturas-header">
         <div>
-          <p className="facturas-eyebrow">Facturas recibidas</p>
-          <h2 className="facturas-title">Bandeja de verificación</h2>
-        </div>
+          <p className="facturas-eyebrow">Facturas emitidas</p>
+          <h2 className="facturas-title">Bandeja de verificación</h2>        </div>
         <button
           className="factura-btn-primary"
           onClick={handleReporteGeneral}

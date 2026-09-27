@@ -343,7 +343,14 @@ def _paso_verificar(db: Session, solicitud, cliente: ClienteSAT) -> str:
     solicitud.fecha_ultimo_intento = _ahora()
     solicitud.estado_solicitud_sat = respuesta.estado_solicitud
     solicitud.codigo_estatus = respuesta.codigo_estatus
-    solicitud.mensaje_sat = respuesta.mensaje
+    # CodigoEstadoSolicitud es el motivo real de un rechazo (5002, 5003,
+    # 5004, 5005, 5011...). Se guarda junto al mensaje para no requerir
+    # migracion: antes se descartaba y por eso la #50 murio "Rechazada"
+    # sin que supieramos por que.
+    mensaje = respuesta.mensaje or ""
+    if respuesta.codigo_estado_solicitud:
+        mensaje = f"{mensaje} | CodigoEstadoSolicitud={respuesta.codigo_estado_solicitud}"
+    solicitud.mensaje_sat = mensaje[:255] or None
 
     if not respuesta.exitoso:
         # Se registra SIEMPRE. Sin esto, una solicitud puede quemar sus 100
@@ -373,8 +380,10 @@ def _paso_verificar(db: Session, solicitud, cliente: ClienteSAT) -> str:
         solicitud.estado = FALLIDA
         solicitud.fecha_completada = _ahora()
         logger.error(
-            "Solicitud %s en estado terminal del SAT: %s",
+            "Solicitud %s en estado terminal del SAT: %s (CodigoEstadoSolicitud=%s, "
+            "mensaje=%s)",
             solicitud.id_solicitud_sat, respuesta.estado_solicitud,
+            respuesta.codigo_estado_solicitud, respuesta.mensaje,
         )
         return FALLIDA
 
@@ -710,6 +719,8 @@ def main() -> None:
         description="Descarga masiva de CFDI del SAT."
     )
     parser.add_argument("--crear-mes", help="Crear solicitud: AAAA-MM")
+    parser.add_argument("--crear-dia", help="Crear solicitud de UN dia: AAAA-MM-DD "
+                        "(prueba de control barata)")
     parser.add_argument("--crear-anio", type=int, help="Crear 12 solicitudes")
     parser.add_argument("--tipo", default=TIPO_METADATA,
                         choices=[TIPO_METADATA, TIPO_CFDI])
@@ -739,6 +750,10 @@ def main() -> None:
             fin = (date(anio + 1, 1, 1) if mes == 12 else date(anio, mes + 1, 1))
             crear_solicitud(db, inicio, fin - timedelta(days=1),
                             args.tipo, args.comprobante)
+
+        if args.crear_dia:
+            dia = date.fromisoformat(args.crear_dia)
+            crear_solicitud(db, dia, dia, args.tipo, args.comprobante)
 
         if args.crear_anio:
             crear_solicitudes_por_mes(db, args.crear_anio,

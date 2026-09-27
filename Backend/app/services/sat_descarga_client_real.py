@@ -22,6 +22,14 @@ TRAMPAS DE cfdiclient QUE ESTE ADAPTADOR RESUELVE
   4. descargar_paquete devuelve base64 en 'paquete_b64', no bytes.
   5. estado_solicitud regresa como string; el orquestador compara contra
      enteros.
+  6. (27/09/2026) La plantilla de SolicitaDescargaEmitidos trae SIEMPRE un
+     <des:RfcReceptores><des:RfcReceptor/></des:RfcReceptores>. Si no se
+     pasa rfc_receptor, viaja VACIO y firmado: se le pide al SAT "emitidas
+     al receptor ''". satcfdi, en cambio, omite el nodo. Aqui se quita.
+  7. (27/09/2026) cfdiclient hace fecha.strftime('%Y-%m-%dT%H:%M:%S'). Con
+     un `date` eso da T00:00:00, asi que "agosto" (01 al 31) en realidad
+     pedia hasta el 31 a las 00:00:00: el ultimo dia quedaba fuera. Se
+     mandan datetimes con los limites reales del dia.
 
 Ubicacion sugerida: app/services/sat_descarga_client_real.py
 """
@@ -30,8 +38,9 @@ from __future__ import annotations
 
 import base64
 import logging
-from datetime import date, datetime, timedelta, timezone
+from datetime import date, datetime, time, timedelta, timezone
 from pathlib import Path
+from zoneinfo import ZoneInfo
 
 from cfdiclient import (
     Autenticacion,
@@ -65,6 +74,50 @@ ESTADO_COMPROBANTE = "Todos"
 VIGENCIA_TOKEN_SEGUNDOS = 240
 
 TIEMPO_ESPERA = 30
+
+ZONA_MEXICO = ZoneInfo("America/Mexico_City")
+
+# Margen para que fecha_final nunca quede "en el futuro" para el SAT.
+MARGEN_FECHA_FINAL = timedelta(minutes=10)
+
+_NS_DES = "{http://DescargaMasivaTerceros.sat.gob.mx}"
+
+
+class _SolicitaEmitidosSinReceptorVacio(SolicitaDescargaEmitidos):
+    """
+    Igual que la de cfdiclient, pero sin el <RfcReceptores> vacio.
+
+    Se quita ANTES de firmar: request() llama a set_request_arguments() y
+    despues a signer.sign(), asi que el digest ya se calcula sin el nodo.
+    """
+
+    def set_request_arguments(self, arguments: dict):
+        solicitud = super().set_request_arguments(arguments)
+        if not arguments.get("RfcReceptores"):
+            for nodo in solicitud.findall(f"{_NS_DES}RfcReceptores"):
+                solicitud.remove(nodo)
+        return solicitud
+
+
+def _limites_del_rango(fecha_inicial: date, fecha_final: date) -> tuple[datetime, datetime]:
+    """
+    Convierte un rango de DIAS en los datetimes que viajan al SAT (hora de
+    Mexico, sin tz: el SAT no acepta offset).
+
+      inicial -> 00:00:00 del primer dia
+      final   -> 23:59:59 del ultimo dia, o "ahora - margen" si el ultimo
+                 dia es hoy (el SAT rechaza con 301 lo que no ha ocurrido)
+    """
+    inicio = datetime.combine(fecha_inicial, time(0, 0, 0))
+    fin = datetime.combine(fecha_final, time(23, 59, 59))
+
+    ahora_mx = datetime.now(ZONA_MEXICO).replace(tzinfo=None, microsecond=0)
+    tope = ahora_mx - MARGEN_FECHA_FINAL
+    if fin > tope:
+        fin = tope
+    if inicio >= fin:
+        raise ValueError(f"Rango vacio o futuro: {inicio} a {fin}")
+    return inicio, fin
 
 
 class ClienteSATReal:
@@ -136,15 +189,25 @@ class ClienteSATReal:
             servicio = SolicitaDescargaRecibidos(self.fiel, timeout=self.timeout)
             filtro = {"rfc_receptor": self.rfc}
         else:
-            servicio = SolicitaDescargaEmitidos(self.fiel, timeout=self.timeout)
+            servicio = _SolicitaEmitidosSinReceptorVacio(self.fiel, timeout=self.timeout)
             filtro = {"rfc_emisor": self.rfc}
+
+        try:
+            inicio, fin = _limites_del_rango(fecha_inicial, fecha_final)
+        except ValueError as error:
+            return RespuestaSolicitud(exitoso=False, mensaje=str(error))
+
+        logger.info(
+            "Solicitando al SAT: %s %s de %s a %s",
+            tipo_solicitud, tipo_comprobante, inicio.isoformat(), fin.isoformat(),
+        )
 
         try:
             resultado = servicio.solicitar_descarga(
                 token,
                 self.rfc,
-                fecha_inicial,
-                fecha_final,
+                inicio,
+                fin,
                 tipo_solicitud=TIPO_SOLICITUD_SAT[tipo_solicitud],
                 estado_comprobante=ESTADO_COMPROBANTE,
                 **filtro,
@@ -193,6 +256,19 @@ class ClienteSATReal:
             return RespuestaVerificacion(exitoso=False, mensaje=str(error))
 
         codigo = resultado.get("cod_estatus")
+
+        # Se registra la respuesta COMPLETA. Hasta el 27/09/2026 se tiraba
+        # CodigoEstadoSolicitud, que es justo el campo que dice POR QUE el SAT
+        # rechazo una solicitud (la #50 termino en estado 5 = Rechazada y
+        # nunca supimos el motivo).
+        logger.info(
+            "Verificacion %s: CodEstatus=%s EstadoSolicitud=%s "
+            "CodigoEstadoSolicitud=%s NumeroCFDIs=%s Mensaje=%s Paquetes=%d",
+            id_solicitud, codigo, resultado.get("estado_solicitud"),
+            resultado.get("codigo_estado_solicitud"),
+            resultado.get("numero_cfdis"), resultado.get("mensaje"),
+            len(resultado.get("paquetes") or []),
+        )
 
         # El SAT regresa todo como string.
         try:

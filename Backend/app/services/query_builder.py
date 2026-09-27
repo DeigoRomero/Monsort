@@ -19,6 +19,39 @@ from app.modelos.complemento_pago import ComplementosPago
 from app.esquemas.factura import FiltrosFactura, ResumenFacturas
 
 
+def existe_cp_activo(db: Session):
+    """
+    EXISTS correlacionado: la factura tiene al menos un pago de un CP vivo.
+
+    Por que EXISTS y no `id_factura IN (subconsulta)`:
+
+    `cp_documentos_relacionados.id_factura` es NULL mientras el pago no se
+    vincula, y en SQL `x NOT IN (1, 2, NULL)` no da FALSE, da NULL — que no
+    es TRUE, asi que el WHERE descarta TODAS las filas. Esa es la razon de
+    que `?con_cp=false` devolviera cero facturas el 27/09/2026 mientras el
+    resumen decia que habia 186: con un solo pago huerfano en la tabla, el
+    NOT IN se envenena entero.
+
+    El `IN` no tenia el problema —un NULL simplemente no empareja con nada—
+    y por eso `?con_cp=true` siempre dio bien. El sintoma aparecio solo de
+    un lado del filtro.
+
+    EXISTS no compara valores, pregunta si hay fila: los NULL no participan.
+    Ademas se puede negar con ~ sin sorpresas y aprovecha el indice de
+    id_factura.
+    """
+    return (
+        db.query(CPDocumentosRelacionados.id)
+        .join(ComplementosPago,
+              CPDocumentosRelacionados.id_complemento == ComplementosPago.id)
+        .filter(
+            CPDocumentosRelacionados.id_factura == Facturas.id_factura,
+            ComplementosPago.cancelado == False,           # noqa: E712
+        )
+        .exists()
+    )
+
+
 def construir_query_facturas(db: Session, filtros: FiltrosFactura):
     """
     Devuelve un Query de SQLAlchemy sin ejecutar.
@@ -95,18 +128,8 @@ def construir_query_facturas(db: Session, filtros: FiltrosFactura):
 
     # --- Con / sin CP ---
     if filtros.con_cp is not None:
-        subquery_cp = (
-            db.query(CPDocumentosRelacionados.id_factura)
-            .join(ComplementosPago,
-                  CPDocumentosRelacionados.id_complemento == ComplementosPago.id)
-            .filter(ComplementosPago.cancelado == False)   # noqa: E712
-            .distinct()
-            .subquery()
-        )
-        if filtros.con_cp:
-            q = q.filter(Facturas.id_factura.in_(subquery_cp))
-        else:
-            q = q.filter(Facturas.id_factura.notin_(subquery_cp))
+        existe = existe_cp_activo(db)
+        q = q.filter(existe if filtros.con_cp else ~existe)
 
     # --- Histórico migrado ---
     if not filtros.incluir_historico:
@@ -126,15 +149,9 @@ def calcular_resumen(db: Session, filtros: FiltrosFactura) -> ResumenFacturas:
     filtros = filtros.model_copy(update={"incluir_historico": True})
     q_base = construir_query_facturas(db, filtros)
 
-    # Subquery: ids de facturas con CP activo vinculado
-    subquery_cp = (
-        db.query(CPDocumentosRelacionados.id_factura)
-        .join(ComplementosPago,
-              CPDocumentosRelacionados.id_complemento == ComplementosPago.id)
-        .filter(ComplementosPago.cancelado == False)       # noqa: E712
-        .distinct()
-        .subquery()
-    )
+    # El mismo criterio que el filtro del listado, a proposito: si el resumen
+    # contara "con CP" de otra forma, la tabla y sus totales se contradirian.
+    existe_cp = existe_cp_activo(db)
 
     resultado = q_base.with_entities(
         func.count(Facturas.id_factura).label("total_facturas"),
@@ -174,7 +191,7 @@ def calcular_resumen(db: Session, filtros: FiltrosFactura) -> ResumenFacturas:
 
         # Facturas con CP
         func.count(
-            case((Facturas.id_factura.in_(subquery_cp), Facturas.id_factura))
+            case((existe_cp, Facturas.id_factura))
         ).label("total_con_cp"),
     ).one()
 

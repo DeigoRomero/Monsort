@@ -87,9 +87,8 @@ export function Dashboard() {
       </aside>
 
       <main className="dashboard-main">
-        {vista === "facturas-recibidas" && <Facturas />}
-        {vista === "facturas-emitidas" && <FacturasRecibidas />}
-        {vista === "complementos" && <Complementos />}
+        {vista === "facturas-recibidas" && <FacturasRecibidas />}
+        {vista === "facturas-emitidas" && <Facturas />}        {vista === "complementos" && <Complementos />}
         {vista === "ordenes" && <OrdenesCompra />}
         {vista === "clientes" && <Clientes />}
         {vista === "crear-usuario" && (

@@ -48,6 +48,14 @@ TAMANIO_LOTE = 500
 # Todo lo demas son hechos de emision y queda intacto.
 COLUMNAS_ESTATUS = ("sat_estado", "fecha_cancelacion")
 
+# Hechos de emision que la ingesta RELLENA solo si estan vacios (COALESCE:
+# nunca pisa un valor existente). Existe por las filas que entraron del
+# Excel de gastos del cliente (origen='excel'): ahi el tipo de comprobante
+# a veces falta o el cliente lo sobreescribio con "CANCELADO", y el PAC
+# solo venia en la hoja de abril. La metadata del SAT es la fuente buena
+# para completarlos.
+COLUMNAS_SOLO_SI_VACIAS = ("efecto_comprobante", "rfc_pac", "nombre_emisor")
+
 # Cuantas lineas rechazadas se guardan en error_ingesta. El campo es Text,
 # pero no tiene sentido volcar miles de lineas ahi.
 MAX_RECHAZOS_REPORTADOS = 20
@@ -127,6 +135,11 @@ def ingerir_metadata_recibidas(
             columna: getattr(sentencia.excluded, columna)
             for columna in COLUMNAS_ESTATUS
         }
+        tabla = FacturasRecibidas.__table__
+        for columna in COLUMNAS_SOLO_SI_VACIAS:
+            campos[columna] = func.coalesce(
+                tabla.c[columna], getattr(sentencia.excluded, columna)
+            )
         # onupdate= del modelo no dispara en un INSERT ... ON CONFLICT,
         # hay que ponerlo a mano.
         campos["actualizado_en"] = func.now()

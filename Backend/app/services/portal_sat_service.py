@@ -237,7 +237,10 @@ def ejecutar_script(argumentos: list[str], timeout: int | None = None) -> dict:
         ) from error
 
     if not datos.get("ok"):
-        raise ErrorPortal(datos.get("tipo_error") or "interno", datos.get("error") or "Error sin detalle")
+        mensaje = datos.get("error") or "Error sin detalle"
+        if "seclevel1" in datos:
+            mensaje += f" [seclevel1={'si' if datos['seclevel1'] else 'no'}]"
+        raise ErrorPortal(datos.get("tipo_error") or "interno", mensaje)
     return datos
 
 
@@ -676,7 +679,11 @@ def main() -> None:
     from app.BaseDeDatos import SessionLocal
 
     if args.verificar_sesion:
-        datos = ejecutar_script(["--verificar-sesion"], timeout=120)
+        try:
+            datos = ejecutar_script(["--verificar-sesion"], timeout=120)
+        except ErrorPortal as error:
+            print(f"ERROR ({error.tipo}): {error.mensaje}")
+            raise SystemExit(1)
         print(f"OK: sesion iniciada como {datos.get('rfc')}. e.firma vence: {datos.get('certificado_vence')}")
         return
 

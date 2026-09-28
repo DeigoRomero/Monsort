@@ -21,7 +21,10 @@ class Settings(BaseSettings):
     SAT_PORTAL_ACTIVO: bool = False            # prende los jobs programados
     SAT_PORTAL_PHP: str = "php"                # ruta al binario de PHP
     SAT_PORTAL_SCRIPT: str | None = None       # default: Backend/sat_portal/consultar_portal.php
-    SAT_PORTAL_SECLEVEL1: bool = False         # solo si el SAT falla con "dh key too small"
+    # El SAT (cfdiau.sat.gob.mx) usa llaves DH de 1024 bits y el OpenSSL de
+    # Ubuntu 26.04 las rechaza ("dh key too small", confirmado 2026-09-28).
+    # Encendido por default; solo afecta las conexiones del script del portal.
+    SAT_PORTAL_SECLEVEL1: bool = True
     SAT_PORTAL_TIMEOUT_SEGUNDOS: int = 900
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 

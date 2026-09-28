@@ -1,0 +1,20 @@
+{
+    "name": "monsort/sat-portal",
+    "description": "Consulta del portal de CFDI del SAT con e.firma. Lo invoca app/services/portal_sat_service.py.",
+    "type": "project",
+    "license": "proprietary",
+    "require": {
+        "php": ">=8.2",
+        "ext-curl": "*",
+        "ext-dom": "*",
+        "ext-fileinfo": "*",
+        "ext-json": "*",
+        "ext-mbstring": "*",
+        "ext-openssl": "*",
+        "phpcfdi/cfdi-sat-scraper": "^5.0"
+    },
+    "config": {
+        "optimize-autoloader": true,
+        "sort-packages": true
+    }
+}

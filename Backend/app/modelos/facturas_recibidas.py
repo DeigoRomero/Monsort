@@ -1,8 +1,8 @@
 from ..BaseDeDatos import Base
 from sqlalchemy import (
-    Column, Integer, String, DECIMAL, DateTime, ForeignKey, Index, func
+    Column, Integer, String, DECIMAL, DateTime, ForeignKey, Index, LargeBinary, func
 )
-from sqlalchemy.orm import relationship
+from sqlalchemy.orm import column_property, deferred, relationship
 
 
 class FacturasRecibidas(Base):
@@ -54,6 +54,13 @@ class FacturasRecibidas(Base):
         Integer, nullable=False, server_default="0", default=0
     )
 
+    # --- Sincronizacion con el portal del SAT (migracion b8d41f6a2c73) ---
+    # deferred: el XML NO se carga al consultar filas (listado, resumen,
+    # verificacion). Solo cuando alguien lo pide explicitamente, igual que
+    # load_only() en Facturas pero sin tener que recordarlo en cada query.
+    xml_factura = deferred(Column(LargeBinary, nullable=True))
+    fecha_vista_portal = Column(DateTime(timezone=True), nullable=True)
+
     # --- Trazabilidad y auditoria ---
     # nullable: permite altas por el endpoint manual sin inventar una solicitud.
     # La solicitud que la origino lleva tipo_comprobante="recibidos".
@@ -75,3 +82,10 @@ class FacturasRecibidas(Base):
             f"<FacturasRecibidas {self.folio_fiscal} "
             f"{self.rfc_emisor} {self.monto_total}>"
         )
+
+# Bandera barata para el listado: "tiene XML" sin cargar el XML. Se define
+# despues de la clase porque xml_factura es deferred y column_property
+# necesita la columna de la tabla, no el atributo.
+FacturasRecibidas.tiene_xml = column_property(
+    FacturasRecibidas.__table__.c.xml_factura.isnot(None)
+)

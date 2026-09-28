@@ -1,0 +1,2 @@
+# Dependencias de composer: se instalan en el servidor con `composer install`
+vendor/

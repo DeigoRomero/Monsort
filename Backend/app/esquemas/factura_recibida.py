@@ -25,6 +25,7 @@ class FacturaRecibidaListado(BaseModel):
     sat_estado: str | None                  # "Vigente" | "Cancelado"
     efecto_comprobante: str | None          # I | E | T | N | P
     fecha_cancelacion: datetime | None
+    tiene_xml: bool = False                 # habilita el boton "Descargar XML"
 
 
 # ---------- DETALLE ----------
@@ -44,7 +45,9 @@ class FacturaRecibidaDetalle(BaseModel):
     efecto_comprobante: str | None
     rfc_pac: str | None
     fecha_cancelacion: datetime | None
-    origen: str
+    origen: str                             # sat | excel | portal
+    tiene_xml: bool = False
+    fecha_vista_portal: datetime | None = None
 
     # Espejo del webservice de consulta de estatus del SAT
     sat_estado: str | None
@@ -133,3 +136,45 @@ class SincronizarRequest(BaseModel):
     """Dispara una solicitud de descarga para un rango concreto."""
     fecha_inicial: date
     fecha_final: date
+
+
+# ---------- SINCRONIZACION CON EL PORTAL DEL SAT ----------
+
+class CorridaPortal(BaseModel):
+    """Una fila de SincronizacionesPortal."""
+    id: int
+    estado: str                             # EN_CURSO | EXITOSA | FALLIDA
+    motivo: str                             # programada | barrido | manual | cli
+    fecha_desde: date
+    fecha_hasta: date
+    inicio: datetime
+    fin: datetime | None
+    cfdis_encontrados: int | None
+    nuevas: int | None
+    actualizadas: int | None
+    xml_descargados: int | None
+    rechazadas: int | None
+    tipo_error: str | None
+    error: str | None
+    avisos: str | None
+
+
+class EstadoSincronizacionPortal(BaseModel):
+    """
+    Lo que va arriba de la tabla de Recibidas:
+      "Ultima sincronizacion con el SAT: hoy 13:02 · 7 nuevas en 24 h"
+    y, si `alerta` trae texto, un aviso visible tal cual.
+    """
+    activo: bool
+    en_curso: bool
+    ultima_sincronizacion_exitosa: datetime | None
+    horas_sin_sincronizar: float | None
+    nuevas_ultimas_24h: int
+    alerta: str | None
+    ultima_corrida: CorridaPortal | None
+
+
+class SincronizarPortalRequest(BaseModel):
+    """Sincronizacion manual. Por defecto, los ultimos 5 dias."""
+    dias: int = 5
+

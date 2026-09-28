@@ -1,4 +1,6 @@
 import logging
+from datetime import timedelta
+from zoneinfo import ZoneInfo
 
 from apscheduler.schedulers.background import BackgroundScheduler
 
@@ -126,6 +128,51 @@ def job_verificar_recibidas():
         db.close()
 
 
+def _sincronizar_portal(dias: int, motivo: str) -> None:
+    """
+    Corrida contra el portal de CFDI del SAT (ver portal_sat_service).
+    No hace nada si SAT_PORTAL_ACTIVO no esta en true: asi se puede
+    desplegar el codigo antes de probar la e.firma contra el portal.
+    """
+    from app.core.config import settings
+    from app.services.portal_sat_service import (
+        SincronizacionEnCurso, hoy_mexico, limpiar_corridas_colgadas,
+        sincronizar_recibidas,
+    )
+
+    if not settings.SAT_PORTAL_ACTIVO:
+        return
+
+    db = SessionLocal()
+    try:
+        limpiar_corridas_colgadas(db)
+        hoy = hoy_mexico()
+        sincronizar_recibidas(db, hoy - timedelta(days=dias), hoy, motivo)
+    except SincronizacionEnCurso:
+        logger.info("Portal SAT: ya habia una corrida en curso; se omite esta (%s)", motivo)
+    except Exception:
+        logger.exception("Error en el job del portal SAT (%s)", motivo)
+    finally:
+        db.close()
+
+
+def job_portal_reciente():
+    """Recibidas de los ultimos dias. Varias veces al dia."""
+    from app.services.portal_sat_service import DIAS_VENTANA_RECIENTE, MOTIVO_PROGRAMADA
+    _sincronizar_portal(DIAS_VENTANA_RECIENTE, MOTIVO_PROGRAMADA)
+
+
+def job_portal_barrido():
+    """Ultimos 90 dias: refresca cancelaciones tardias. Semanal."""
+    from app.services.portal_sat_service import DIAS_BARRIDO, MOTIVO_BARRIDO
+    _sincronizar_portal(DIAS_BARRIDO, MOTIVO_BARRIDO)
+
+
+# Los jobs nuevos llevan zona horaria EXPLICITA. El scheduler global sigue
+# en la zona del sistema (UTC en el VPS) para no mover los cron que ya
+# existen; ese ajuste esta pendiente aparte.
+ZONA_MEXICO = ZoneInfo("America/Mexico_City")
+
 scheduler = BackgroundScheduler()
 
 scheduler.add_job(
@@ -183,6 +230,45 @@ scheduler.add_job(
     hour=4,
     minute=30,
     id="verificar_recibidas",
+    max_instances=1,
+    coalesce=True,
+    misfire_grace_time=3600,
+)
+
+# Portal del SAT: 9, 12, 15 y 18 h, y 22:40 para cerrar el dia (hora de Mexico).
+# Minuto 7 para no caer en el :00, cuando mas gente consulta el SAT.
+scheduler.add_job(
+    job_portal_reciente,
+    "cron",
+    hour="9,12,15,18",
+    minute=7,
+    timezone=ZONA_MEXICO,
+    id="portal_reciente",
+    max_instances=1,
+    coalesce=True,
+    misfire_grace_time=1800,
+)
+
+scheduler.add_job(
+    job_portal_reciente,
+    "cron",
+    hour=22,
+    minute=40,
+    timezone=ZONA_MEXICO,
+    id="portal_cierre_dia",
+    max_instances=1,
+    coalesce=True,
+    misfire_grace_time=1800,
+)
+
+scheduler.add_job(
+    job_portal_barrido,
+    "cron",
+    day_of_week="sun",
+    hour=3,
+    minute=20,
+    timezone=ZONA_MEXICO,
+    id="portal_barrido",
     max_instances=1,
     coalesce=True,
     misfire_grace_time=3600,

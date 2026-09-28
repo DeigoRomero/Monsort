@@ -7,8 +7,12 @@ export interface FacturaRecibidaListado {
   nombre_emisor: string;
   fecha_emision: string;
   monto_total: string;
-  sat_estado: string;
-  efecto_comprobante: string;
+  // null hasta que el SAT se consulta: la metadata del SAT no siempre trae
+  // EstadoCFDI y las filas viejas nunca se verificaron. El backend siempre
+  // pudo mandar null aqui; el tipo decia string y por eso tsc nunca marco
+  // los .toLowerCase() sin guarda que dejaban la pagina en blanco.
+  sat_estado: string | null;
+  efecto_comprobante: string | null;
   fecha_cancelacion: string | null;
 }
 

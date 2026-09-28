@@ -24,7 +24,20 @@ function formatMonto(valor?: string | null) {
   });
 }
 
-function EstadoSatBadge({ estado }: { estado: string }) {
+function EstadoSatBadge({ estado }: { estado: string | null }) {
+  // Sin estado no se puede afirmar "Vigente": se dice que no se ha
+  // consultado, que es lo que realmente pasa.
+  if (!estado) {
+    return (
+      <span
+        className="factura-badge"
+        style={{ background: "#eef0f3", color: "#8a92a5" }}
+      >
+        Sin consultar
+      </span>
+    );
+  }
+
   const cancelado = estado.toLowerCase().includes("cancel");
   return (
     <span
@@ -264,7 +277,7 @@ export function FacturasRecibidas() {
                 <tr
                   key={f.id_factura_recibida}
                   className={`facturas-row${
-                    f.sat_estado.toLowerCase().includes("cancel")
+                    (f.sat_estado ?? "").toLowerCase().includes("cancel")
                       ? " facturas-row-cancelada"
                       : ""
                   }`}

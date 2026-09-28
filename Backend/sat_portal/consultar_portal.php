@@ -63,11 +63,23 @@ function salir(array $resultado, int $codigo): never
 
 function fallar(string $tipo, string $mensaje, int $codigo, ?Throwable $e = null): never
 {
+    // La libreria envuelve la causa real (SSL, DNS, HTTP 500...) en una
+    // excepcion generica como "Connection error when try to login using FIEL".
+    // Se recorre la cadena de getPrevious() para que el error diga POR QUE.
+    $causas = [];
+    for ($actual = $e?->getPrevious(); null !== $actual; $actual = $actual->getPrevious()) {
+        $causas[] = get_class($actual) . ': ' . $actual->getMessage();
+    }
+    if ($causas) {
+        $mensaje .= ' | Causa: ' . implode(' <- ', $causas);
+    }
     salir([
         'ok' => false,
+        'seclevel1' => '1' === getenv('SAT_PORTAL_SECLEVEL1'),
         'tipo_error' => $tipo,
         'error' => $mensaje,
         'excepcion' => $e ? get_class($e) : null,
+        'causas' => $causas,
     ], $codigo);
 }
 
@@ -131,6 +143,7 @@ if (isset($opciones['verificar-sesion'])) {
         'ok' => true,
         'rfc' => $credencial->rfc(),
         'mensaje' => 'Sesion iniciada correctamente',
+        'seclevel1' => '1' === getenv('SAT_PORTAL_SECLEVEL1'),
         'certificado_vence' => $credencial->certificate()->validTo(),
     ], 0);
 }

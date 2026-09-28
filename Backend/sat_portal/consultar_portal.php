@@ -30,6 +30,7 @@
  *   SAT_CER_PATH, SAT_KEY_PATH, SAT_KEY_PASSWORD
  *   SAT_PORTAL_SECLEVEL1=1      baja el nivel de cifrado SOLO para esta conexion
  *                               (el SAT usa llaves DH pequenas; ver README de la libreria)
+ *   SAT_PORTAL_CA_BUNDLE=ruta   certificados raiz + intermedios del SAT (armar_ca_bundle.sh)
  *
  * Codigos de salida: 0 ok, 2 configuracion/credencial, 3 login, 4 error del portal.
  * En todos los casos stdout trae JSON con "ok" y, si fallo, "tipo_error" y "error".
@@ -121,6 +122,12 @@ if (! $credencial->certificate()->validOn()) {
 $opcionesCliente = ['connect_timeout' => 30, 'timeout' => 180];
 if ('1' === getenv('SAT_PORTAL_SECLEVEL1')) {
     $opcionesCliente['curl'] = [CURLOPT_SSL_CIPHER_LIST => 'DEFAULT@SECLEVEL=1'];
+}
+// Bundle con los intermedios que el SAT no manda (ver armar_ca_bundle.sh).
+// Sigue verificando certificados; solo le da a curl las piezas que faltan.
+$bundle = getenv('SAT_PORTAL_CA_BUNDLE') ?: '';
+if ('' !== $bundle) {
+    $opcionesCliente['verify'] = $bundle;
 }
 $avisos = new AvisosDeMetadata();
 $scraper = new SatScraper(

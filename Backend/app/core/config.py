@@ -25,6 +25,10 @@ class Settings(BaseSettings):
     # Ubuntu 26.04 las rechaza ("dh key too small", confirmado 2026-09-28).
     # Encendido por default; solo afecta las conexiones del script del portal.
     SAT_PORTAL_SECLEVEL1: bool = True
+    # portalcfdi.facturaelectronica.sat.gob.mx no manda su certificado
+    # intermedio (cURL error 60). Se arma un bundle con
+    # Backend/sat_portal/armar_ca_bundle.sh y se apunta aqui. Vacio = CAs del sistema.
+    SAT_PORTAL_CA_BUNDLE: str | None = None
     SAT_PORTAL_TIMEOUT_SEGUNDOS: int = 900
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 

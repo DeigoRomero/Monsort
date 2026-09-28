@@ -210,6 +210,10 @@ def ejecutar_script(argumentos: list[str], timeout: int | None = None) -> dict:
     entorno["SAT_KEY_PATH"] = settings.SAT_KEY_PATH
     entorno["SAT_KEY_PASSWORD"] = settings.SAT_KEY_PASSWORD
     entorno["SAT_PORTAL_SECLEVEL1"] = "1" if settings.SAT_PORTAL_SECLEVEL1 else "0"
+    if settings.SAT_PORTAL_CA_BUNDLE:
+        if not Path(settings.SAT_PORTAL_CA_BUNDLE).is_file():
+            raise ErrorPortal("configuracion", f"No existe SAT_PORTAL_CA_BUNDLE={settings.SAT_PORTAL_CA_BUNDLE}")
+        entorno["SAT_PORTAL_CA_BUNDLE"] = settings.SAT_PORTAL_CA_BUNDLE
 
     comando = [settings.SAT_PORTAL_PHP, str(script), *argumentos]
     try:

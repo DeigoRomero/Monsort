@@ -3,13 +3,17 @@ import {
   listarFacturasRecibidas,
   listarEmisores,
   obtenerFacturaRecibida,
-  sincronizarRecibidas,
+  obtenerEstadoSincronizacion,
+  listarHistorialSincronizacion,
   descargarReporteRecibidas,
+  urlXmlRecibida,
   type FacturaRecibidaListado,
   type FacturaRecibidaDetalle,
   type ResumenFacturasRecibidas,
   type EmisorOpcion,
   type FiltrosRecibidas,
+  type EstadoSincronizacionPortal,
+  type CorridaPortal,
 } from "../api/facturas-recibidas";
 import { ApiError } from "../api/client";
 import "./Facturas.css";
@@ -22,6 +26,35 @@ function formatMonto(valor?: string | null) {
     minimumFractionDigits: 2,
     maximumFractionDigits: 2,
   });
+}
+
+/** "hoy 13:02" / "ayer 18:07" / "24 sep 09:07" */
+function formatSincronizacion(iso: string | null) {
+  if (!iso) return "todavía no se ha sincronizado";
+
+  const fecha = new Date(iso);
+  if (Number.isNaN(fecha.getTime())) return "fecha no disponible";
+
+  const hora = fecha.toLocaleTimeString("es-MX", {
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+  });
+
+  const hoy = new Date();
+  const ayer = new Date();
+  ayer.setDate(hoy.getDate() - 1);
+
+  const mismoDia = (a: Date, b: Date) =>
+    a.getFullYear() === b.getFullYear() &&
+    a.getMonth() === b.getMonth() &&
+    a.getDate() === b.getDate();
+
+  if (mismoDia(fecha, hoy)) return `hoy ${hora}`;
+  if (mismoDia(fecha, ayer)) return `ayer ${hora}`;
+
+  const dia = fecha.toLocaleDateString("es-MX", { day: "numeric", month: "short" });
+  return `${dia} ${hora}`;
 }
 
 function EstadoSatBadge({ estado }: { estado: string | null }) {
@@ -53,16 +86,53 @@ function EstadoSatBadge({ estado }: { estado: string | null }) {
   );
 }
 
+function EncabezadoSincronizacion({
+  estado,
+}: {
+  estado: EstadoSincronizacionPortal | null;
+}) {
+  if (!estado || !estado.activo) return null;
+
+  return (
+    <div className="recibidas-sync">
+      <div className="recibidas-sync-linea">
+        <span className="recibidas-sync-texto">
+          {estado.en_curso ? (
+            <>
+              <span className="recibidas-sync-punto" />
+              Sincronizando…
+            </>
+          ) : (
+            <>
+              Última sincronización con el SAT:{" "}
+              <strong>
+                {formatSincronizacion(estado.ultima_sincronizacion_exitosa)}
+              </strong>
+              {estado.nuevas_ultimas_24h > 0 && (
+                <> · {estado.nuevas_ultimas_24h} nuevas en 24 h</>
+              )}
+            </>
+          )}
+        </span>
+      </div>
+
+      {estado.alerta && <p className="recibidas-sync-alerta">{estado.alerta}</p>}
+    </div>
+  );
+}
+
 export function FacturasRecibidas() {
   const [facturas, setFacturas] = useState<FacturaRecibidaListado[]>([]);
   const [resumen, setResumen] = useState<ResumenFacturasRecibidas | null>(null);
   const [emisores, setEmisores] = useState<EmisorOpcion[]>([]);
+  const [sincronizacion, setSincronizacion] =
+    useState<EstadoSincronizacionPortal | null>(null);
   const [pagina, setPagina] = useState(1);
   const [totalPaginas, setTotalPaginas] = useState(1);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [idSeleccionado, setIdSeleccionado] = useState<number | null>(null);
-  const [mostrarSincronizar, setMostrarSincronizar] = useState(false);
+  const [mostrarHistorial, setMostrarHistorial] = useState(false);
 
   const [q, setQ] = useState("");
   const [rfcEmisor, setRfcEmisor] = useState("");
@@ -75,6 +145,7 @@ export function FacturasRecibidas() {
 
   useEffect(() => {
     listarEmisores().then(setEmisores).catch(() => {});
+    obtenerEstadoSincronizacion().then(setSincronizacion).catch(() => {});
   }, []);
 
   useEffect(() => {
@@ -136,18 +207,23 @@ export function FacturasRecibidas() {
     );
   }
 
+  if (mostrarHistorial) {
+    return <HistorialSincronizacion onVolver={() => setMostrarHistorial(false)} />;
+  }
+
   return (
     <div className="facturas-panel">
       <div className="facturas-header">
         <div>
-        <p className="facturas-eyebrow">Del SAT · Descarga Masiva</p>
-        <h2 className="facturas-title">Facturas recibidas</h2>        </div>
+          <p className="facturas-eyebrow">Del SAT · Portal</p>
+          <h2 className="facturas-title">Facturas recibidas</h2>
+        </div>
         <div style={{ display: "flex", gap: 10 }}>
           <button
             className="factura-btn-secondary"
-            onClick={() => setMostrarSincronizar(true)}
+            onClick={() => setMostrarHistorial(true)}
           >
-            Sincronizar con SAT
+            Historial
           </button>
           <button
             className="factura-btn-primary"
@@ -158,6 +234,8 @@ export function FacturasRecibidas() {
           </button>
         </div>
       </div>
+
+      <EncabezadoSincronizacion estado={sincronizacion} />
 
       <p className="facturas-nota-historico">
         Este listado es de solo lectura — proviene directamente del SAT. Los datos no
@@ -182,7 +260,7 @@ export function FacturasRecibidas() {
             <option value="">Todos los proveedores</option>
             {emisores.map((em) => (
               <option key={em.rfc_emisor} value={em.rfc_emisor}>
-                {em.nombre_emisor} ({em.total_facturas})
+                {em.nombre_emisor ?? em.rfc_emisor} ({em.total_facturas})
               </option>
             ))}
           </select>
@@ -270,6 +348,7 @@ export function FacturasRecibidas() {
                 <th>Fecha</th>
                 <th>Monto</th>
                 <th>Estatus SAT</th>
+                <th>XML</th>
               </tr>
             </thead>
             <tbody>
@@ -289,13 +368,26 @@ export function FacturasRecibidas() {
                   >
                     {f.folio_fiscal.slice(0, 8)}…
                   </td>
-                  <td>{f.nombre_emisor}</td>
+                  <td>{f.nombre_emisor ?? f.rfc_emisor}</td>
                   <td className="facturas-cell-muted">
                     {f.fecha_emision.slice(0, 10)}
                   </td>
                   <td className="facturas-cell-mono">${formatMonto(f.monto_total)}</td>
                   <td>
                     <EstadoSatBadge estado={f.sat_estado} />
+                  </td>
+                  <td>
+                    {f.tiene_xml ? (
+                      <a
+                        className="recibidas-xml-link"
+                        href={urlXmlRecibida(f.id_factura_recibida)}
+                        onClick={(e) => e.stopPropagation()}
+                      >
+                        Descargar
+                      </a>
+                    ) : (
+                      <span style={{ color: "#c4cad6", fontSize: 12 }}>—</span>
+                    )}
                   </td>
                 </tr>
               ))}
@@ -329,102 +421,102 @@ export function FacturasRecibidas() {
           </div>
         </>
       )}
-
-      {mostrarSincronizar && (
-        <SincronizarModal onCerrar={() => setMostrarSincronizar(false)} />
-      )}
     </div>
   );
 }
 
-function SincronizarModal({ onCerrar }: { onCerrar: () => void }) {
-  const [fechaInicial, setFechaInicial] = useState("");
-  const [fechaFinal, setFechaFinal] = useState("");
-  const [isLoading, setIsLoading] = useState(false);
-  const [mensaje, setMensaje] = useState<string | null>(null);
+function HistorialSincronizacion({ onVolver }: { onVolver: () => void }) {
+  const [corridas, setCorridas] = useState<CorridaPortal[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  async function handleSincronizar() {
-    setIsLoading(true);
-    setError(null);
-    setMensaje(null);
-    try {
-      await sincronizarRecibidas({
-        fecha_inicial: fechaInicial,
-        fecha_final: fechaFinal,
-      });
-      setMensaje(
-        "Solicitud registrada. El SAT puede tardar de minutos a horas en responder — los datos aparecerán aquí cuando estén listos."
-      );
-    } catch (err) {
-      setError(
-        err instanceof ApiError ? err.message : "No se pudo registrar la solicitud."
-      );
-    } finally {
-      setIsLoading(false);
-    }
+  useEffect(() => {
+    listarHistorialSincronizacion(20)
+      .then(setCorridas)
+      .catch((err) => {
+        setError(
+          err instanceof ApiError
+            ? err.message
+            : "No se pudo cargar el historial."
+        );
+      })
+      .finally(() => setIsLoading(false));
+  }, []);
+
+  function badgeEstado(estado: string) {
+    if (estado === "EXITOSA")
+      return { background: "#e5f0e8", color: "#2e7d5b" };
+    if (estado === "FALLIDA")
+      return { background: "#fbe7e7", color: "#a33b3b" };
+    return { background: "#fdf1de", color: "#8a6d1f" };
   }
 
   return (
-    <div className="cancelar-modal-overlay" onClick={onCerrar}>
-      <div className="cancelar-modal" onClick={(e) => e.stopPropagation()}>
-        <h3 className="cancelar-modal-title">Sincronizar con el SAT</h3>
-        <p className="cancelar-modal-warning">
-          Esto dispara una descarga manual para el rango que elijas. No es
-          inmediato — el SAT procesa la solicitud de forma asíncrona.
-        </p>
-
-        <div style={{ display: "flex", gap: 10, marginBottom: 14 }}>
-          <label className="field" style={{ flex: 1 }}>
-            <span className="field-label">Fecha inicial</span>
-            <input
-              className="field-input"
-              type="date"
-              value={fechaInicial}
-              onChange={(e) => setFechaInicial(e.target.value)}
-            />
-          </label>
-          <label className="field" style={{ flex: 1 }}>
-            <span className="field-label">Fecha final</span>
-            <input
-              className="field-input"
-              type="date"
-              value={fechaFinal}
-              onChange={(e) => setFechaFinal(e.target.value)}
-            />
-          </label>
-        </div>
-
-        {mensaje && (
-          <p
-            className="facturas-status"
-            style={{ color: "#2e7d5b", padding: 0, textAlign: "left", marginBottom: 10 }}
-          >
-            {mensaje}
-          </p>
-        )}
-        {error && (
-          <p
-            className="facturas-status facturas-status-error"
-            style={{ padding: 0, textAlign: "left", marginBottom: 10 }}
-          >
-            {error}
-          </p>
-        )}
-
-        <div className="cancelar-modal-actions">
-          <button className="factura-btn-secondary" onClick={onCerrar}>
-            Cerrar
-          </button>
-          <button
-            className="factura-btn-primary"
-            onClick={handleSincronizar}
-            disabled={isLoading || !fechaInicial || !fechaFinal}
-          >
-            {isLoading ? "Enviando…" : "Sincronizar"}
-          </button>
-        </div>
+    <div className="facturas-panel">
+      <div className="factura-detalle-header">
+        <span className="factura-volver" onClick={onVolver}>
+          ← Volver
+        </span>
+        <span className="factura-detalle-divider">|</span>
+        <h2 className="factura-detalle-title">Historial de sincronizaciones</h2>
       </div>
+
+      {isLoading && <p className="facturas-status">Cargando historial…</p>}
+      {error && <p className="facturas-status facturas-status-error">{error}</p>}
+
+      {!isLoading && !error && (
+        <>
+          <table className="facturas-table">
+            <thead>
+              <tr>
+                <th>Inicio</th>
+                <th>Tipo</th>
+                <th>Estado</th>
+                <th>Rango consultado</th>
+                <th>Nuevas / actualizadas</th>
+              </tr>
+            </thead>
+            <tbody>
+              {corridas.map((c) => (
+                <tr key={c.id} className="facturas-row">
+                  <td className="facturas-cell-muted">
+                    {c.inicio.replace("T", " ").slice(0, 16)}
+                  </td>
+                  <td>{c.motivo}</td>
+                  <td>
+                    <span className="factura-badge" style={badgeEstado(c.estado)}>
+                      {c.estado}
+                    </span>
+                    {c.estado === "FALLIDA" && c.error && (
+                      <p
+                        style={{
+                          margin: "6px 0 0",
+                          fontSize: 12,
+                          color: "#a33b3b",
+                        }}
+                      >
+                        {c.error}
+                      </p>
+                    )}
+                  </td>
+                  <td className="facturas-cell-muted">
+                    {c.fecha_desde} – {c.fecha_hasta}
+                  </td>
+                  <td className="facturas-cell-mono">
+                    {c.nuevas ?? 0} / {c.actualizadas ?? 0}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+
+          {corridas.length === 0 && (
+            <p className="facturas-status">
+              Todavía no hay sincronizaciones registradas.
+            </p>
+          )}
+        </>
+      )}
     </div>
   );
 }
@@ -477,7 +569,7 @@ function FacturaRecibidaDetalleView({
         </span>
         <span className="factura-detalle-divider">|</span>
         <h2 className="factura-detalle-title">
-          Factura de {factura.nombre_emisor}
+          Factura de {factura.nombre_emisor ?? factura.rfc_emisor}
         </h2>
         <span className="factura-detalle-badge-wrap">
           <EstadoSatBadge estado={factura.sat_estado} />
@@ -503,7 +595,7 @@ function FacturaRecibidaDetalleView({
         <div className="factura-campo">
           <label className="factura-detalle-label">Nombre emisor</label>
           <div className="factura-campo-valor factura-campo-readonly">
-            {factura.nombre_emisor}
+            {factura.nombre_emisor ?? "—"}
           </div>
         </div>
         <div className="factura-campo">
@@ -521,7 +613,7 @@ function FacturaRecibidaDetalleView({
         <div className="factura-campo">
           <label className="factura-detalle-label">Tipo de comprobante</label>
           <div className="factura-campo-valor factura-campo-readonly">
-            {factura.efecto_comprobante}
+            {factura.efecto_comprobante ?? "—"}
           </div>
         </div>
         <div className="factura-campo">
@@ -530,6 +622,14 @@ function FacturaRecibidaDetalleView({
             {factura.origen}
           </div>
         </div>
+        {factura.fecha_vista_portal && (
+          <div className="factura-campo">
+            <label className="factura-detalle-label">Vista en el portal</label>
+            <div className="factura-campo-valor factura-campo-readonly">
+              {factura.fecha_vista_portal.replace("T", " ").slice(0, 16)}
+            </div>
+          </div>
+        )}
       </div>
 
       <div className="factura-detalle-sat">
@@ -564,13 +664,26 @@ function FacturaRecibidaDetalleView({
         </div>
       </div>
 
-      <p
-        className="facturas-status"
-        style={{ padding: "0 24px 20px", textAlign: "left" }}
-      >
-        Esta factura no tiene PDF ni XML descargables — el SAT solo entrega metadata
-        por este medio.
-      </p>
+      <div className="factura-detalle-archivo">
+        <label className="factura-detalle-label">Archivo</label>
+        {factura.tiene_xml ? (
+          <a className="factura-file-card" href={urlXmlRecibida(factura.id_factura_recibida)}>
+            <span className="factura-file-icon">XML</span>
+            <div>
+              <p className="factura-file-name">{factura.folio_fiscal.slice(0, 8)}….xml</p>
+              <p className="factura-file-action">Descargar archivo</p>
+            </div>
+          </a>
+        ) : (
+          <p
+            className="facturas-status"
+            style={{ padding: 0, textAlign: "left" }}
+          >
+            Esta factura no tiene XML. El SAT no entrega el archivo de los
+            comprobantes cancelados.
+          </p>
+        )}
+      </div>
     </div>
   );
 }

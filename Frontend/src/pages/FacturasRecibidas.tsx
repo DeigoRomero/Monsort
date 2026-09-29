@@ -18,6 +18,7 @@ import {
 } from "../api/facturas-recibidas";
 import { ApiError } from "../api/client";
 import "./Facturas.css";
+import { useAuth } from "../context/AuthContext";
 
 function formatMonto(valor?: string | null) {
   if (!valor) return "—";
@@ -145,7 +146,10 @@ export function FacturasRecibidas() {
   const [descargandoReporte, setDescargandoReporte] = useState(false);
   const [sincronizando, setSincronizando] = useState(false);
   const [errorSincronizacion, setErrorSincronizacion] = useState<string | null>(null);
-
+  const { session } = useAuth();
+  const rol = session?.usuario.rol?.toLowerCase() ?? "";
+  const puedeSincronizar = ["desarrollador", "administrador"].includes(rol);
+  
   useEffect(() => {
     listarEmisores().then(setEmisores).catch(() => {});
     obtenerEstadoSincronizacion().then(setSincronizacion).catch(() => {});
@@ -259,15 +263,17 @@ export function FacturasRecibidas() {
           <h2 className="facturas-title">Facturas recibidas</h2>
         </div>
         <div style={{ display: "flex", gap: 10 }}>
-          <button
-            className="factura-btn-secondary"
-            onClick={handleSincronizarAhora}
-            disabled={sincronizando || sincronizacion?.en_curso}
-          >
-            {sincronizando || sincronizacion?.en_curso
-              ? "Consultando al SAT…"
-              : "Actualizar desde el SAT"}
-          </button>
+          {puedeSincronizar && (
+            <button
+              className="factura-btn-secondary"
+              onClick={handleSincronizarAhora}
+              disabled={sincronizando || sincronizacion?.en_curso}
+            >
+              {sincronizando || sincronizacion?.en_curso
+                ? "Consultando al SAT…"
+                : "Actualizar desde el SAT"}
+            </button>
+          )}
           <button
             className="factura-btn-secondary"
             onClick={() => setMostrarHistorial(true)}

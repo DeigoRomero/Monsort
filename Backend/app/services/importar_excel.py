@@ -152,8 +152,11 @@ def importar(db, filas, dry_run=True):
             iva=fila["iva"],
             total=fila["total"],
             fecha_liquidacion=fila["fecha_liquidacion"],
-            # fecha_validacion se deja vacia: el Excel no la registra y de
-            # ella depende el calculo de la fecha limite de pago
+            # De abril de 2026 en adelante el Excel SI la registra: la
+            # columna 12 deja de ser "fecha probable" y pasa a ser "fecha de
+            # validacion". De ella depende el calculo de la fecha limite de
+            # pago, y por eso el historico salia sin vencimiento.
+            fecha_validacion=fila.get("fecha_validacion"),
             message_id=None,
             id_usuario=usuario.id_usuario,
             id_estado=estado.id_estado,

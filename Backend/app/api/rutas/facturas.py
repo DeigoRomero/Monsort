@@ -57,6 +57,8 @@ def _factura_a_listado(f: Facturas, tiene_cp: bool) -> FacturaListado:
         rfc=f.rfc,
         fecha=f.fecha,
         numero_oc=f.numero_oc,
+        subtotal=f.subtotal,
+        iva=f.iva,
         total=f.total,
         moneda=f.moneda,
         tipo_cambio=f.tipo_cambio,

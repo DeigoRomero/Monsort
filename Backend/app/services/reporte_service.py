@@ -103,6 +103,19 @@ def _estilos():
         "celda_bold": ParagraphStyle(
             "CeldaBold", parent=celda, fontName="Helvetica-Bold",
         ),
+        # El TEXTCOLOR de un TableStyle NO entra a un Paragraph: el estilo del
+        # parrafo manda. Por eso los titulos salian negros sobre el azul
+        # oscuro y no se leian, aunque el estilo de la tabla dijera BLANCO.
+        # Las celdas del encabezado llevan este estilo.
+        "encabezado_tabla": ParagraphStyle(
+            "EncabezadoTabla", parent=celda,
+            fontName="Helvetica-Bold", textColor=BLANCO, fontSize=8,
+        ),
+        # Misma razon para la fila de totales, que va sobre azul claro.
+        "celda_total": ParagraphStyle(
+            "CeldaTotal", parent=celda,
+            fontName="Helvetica-Bold", textColor=BLANCO,
+        ),
         "seccion": ParagraphStyle(
             "Seccion", parent=base["Heading2"],
             textColor=AZUL_OSCURO, fontSize=10,
@@ -173,20 +186,37 @@ def _tabla_dos_columnas(datos: list, estilos: dict) -> Table:
 # REPORTE GENERAL
 # ═══════════════════════════════════════════════════════════════════════════
 
-def generar_reporte_general(db: Session, filtros: FiltrosFactura) -> bytes:
-    filtros.incluir_canceladas = False
+def generar_reporte_general(db: Session, filtros: FiltrosFactura,
+                            solo_ciclo_completo: bool = False) -> bytes:
+    """
+    Reporte general en PDF de lo que devuelva el filtro.
 
-    facturas_raw = (
+    Hasta el 29/09/2026 este reporte tenia dos filtros que nadie pedia y que
+    no se veian desde la pantalla: se quedaba solo con las facturas que
+    tuvieran orden de compra vinculada Y complemento activo, y ademas
+    heredaba `incluir_historico=False`, que deja fuera las facturas
+    importadas del Excel. Entre las dos cosas, poner un rango de fechas
+    devolvia un puñado de facturas y parecia que el filtro no servia.
+
+    Ahora manda el filtro. `solo_ciclo_completo=True` recupera el
+    comportamiento anterior para quien lo quiera, pero es opcional y explicito.
+    """
+    filtros.incluir_canceladas = False
+    # El historico del Excel son facturas reales del cliente: en un reporte
+    # "general" con rango de fechas, esconderlas es mentir sobre el periodo.
+    filtros.incluir_historico = True
+
+    facturas = (
         construir_query_facturas(db, filtros)
         .order_by(Facturas.fecha.asc())
         .all()
     )
 
-    # Solo ciclo completo: OC vinculada + CP activo
-    facturas = [
-        f for f in facturas_raw
-        if f.id_orden_compra is not None and _tiene_cp_activo(db, f.id_factura)
-    ]
+    if solo_ciclo_completo:
+        facturas = [
+            f for f in facturas
+            if f.id_orden_compra is not None and _tiene_cp_activo(db, f.id_factura)
+        ]
 
     buffer = io.BytesIO()
     doc = SimpleDocTemplate(
@@ -212,36 +242,55 @@ def generar_reporte_general(db: Session, filtros: FiltrosFactura) -> bytes:
     _encabezado(story, "Reporte General de Facturas", subtitulo_txt, estilos)
 
     if not facturas:
+        motivo = (" con ciclo completo (orden de compra y complemento de pago)"
+                  if solo_ciclo_completo else "")
         story.append(Paragraph(
-            "No se encontraron facturas con ciclo completo para los filtros aplicados.",
+            f"No se encontraron facturas{motivo} para los filtros aplicados.",
             estilos["celda"],
         ))
         doc.build(story)
         return buffer.getvalue()
 
-    # Anchos landscape (~27.9 cm útiles)
-    col_widths = [3*cm, 2.5*cm, 2.5*cm, 6.7*cm, 2.5*cm, 2.5*cm, 2.8*cm, 1.8*cm, 2.2*cm]
+    # Anchos landscape (~24.9 cm utiles con los margenes de 1.5 cm)
+    col_widths = [3*cm, 2.1*cm, 2.1*cm, 4.6*cm, 2.3*cm, 2*cm, 2.3*cm,
+                  1.4*cm, 2.3*cm, 1.8*cm]
 
+    # El orden y los nombres son los de la contabilidad del cliente:
+    # Importe (subtotal del CFDI), IVA, Total. "Total MXN" es la conversion
+    # con el tipo de cambio, que solo difiere en moneda extranjera.
     encabezado_tabla = [[
-        Paragraph("UUID / Folio Fiscal",  estilos["celda_bold"]),
-        Paragraph("Folio Interno",        estilos["celda_bold"]),
-        Paragraph("Orden de Compra",      estilos["celda_bold"]),
-        Paragraph("Descripción",          estilos["celda_bold"]),
-        Paragraph("IVA",                  estilos["celda_bold"]),
-        Paragraph("Subtotal",             estilos["celda_bold"]),
-        Paragraph("Total MXN",            estilos["celda_bold"]),
-        Paragraph("Moneda",               estilos["celda_bold"]),
-        Paragraph("Fecha",                estilos["celda_bold"]),
+        Paragraph("UUID / Folio Fiscal",  estilos["encabezado_tabla"]),
+        Paragraph("Folio Interno",        estilos["encabezado_tabla"]),
+        Paragraph("Orden de Compra",      estilos["encabezado_tabla"]),
+        Paragraph("Descripción",          estilos["encabezado_tabla"]),
+        Paragraph("Importe",              estilos["encabezado_tabla"]),
+        Paragraph("IVA",                  estilos["encabezado_tabla"]),
+        Paragraph("Total",                estilos["encabezado_tabla"]),
+        Paragraph("Moneda",               estilos["encabezado_tabla"]),
+        Paragraph("Total MXN",            estilos["encabezado_tabla"]),
+        Paragraph("Fecha",                estilos["encabezado_tabla"]),
     ]]
 
     filas          = []
     suma_total_mxn = Decimal("0")
+    # Importe e IVA se suman en su moneda original y solo cuando TODO el
+    # reporte es de una sola moneda: sumar pesos con dolares da un numero que
+    # no significa nada. Si hay mezcla, esas celdas van vacias.
+    suma_subtotal  = Decimal("0")
+    suma_iva       = Decimal("0")
+    monedas        = set()
     hay_sin_conv   = False  # flag para nota al pie
 
     for f in facturas:
         conceptos    = db.query(Conceptos).filter(Conceptos.id_factura == f.id_factura).all()
         descripcion  = _descripcion_conceptos(conceptos)
         total_mxn    = _total_mxn(f)
+
+        monedas.add((f.moneda or "MXN").upper())
+        if f.subtotal is not None:
+            suma_subtotal += Decimal(str(f.subtotal))
+        if f.iva is not None:
+            suma_iva += Decimal(str(f.iva))
 
         if total_mxn is not None:
             suma_total_mxn += total_mxn
@@ -259,25 +308,31 @@ def generar_reporte_general(db: Session, filtros: FiltrosFactura) -> bytes:
             Paragraph(f.folio_interno or "—", estilos["celda"]),
             Paragraph(f.numero_oc     or "—", estilos["celda"]),
             Paragraph(descripcion,             estilos["celda"]),
-            Paragraph(_fmt_decimal(f.iva),     estilos["celda"]),
             Paragraph(_fmt_decimal(f.subtotal),estilos["celda"]),
-            celda_total,
+            Paragraph(_fmt_decimal(f.iva),     estilos["celda"]),
+            Paragraph(_fmt_decimal(f.total),   estilos["celda"]),
             Paragraph(f.moneda or "MXN",       estilos["celda"]),
+            celda_total,
             Paragraph(_fmt_fecha(f.fecha),     estilos["celda"]),
         ])
 
     # Fila de total
     nota_total = "" if not hay_sin_conv else " (excluye facturas marcadas con *)"
+    if len(monedas) > 1:
+        suma_subtotal = None
+        suma_iva = None
     fila_total = [
-        Paragraph(f"TOTAL  ({len(facturas)} facturas){nota_total}", estilos["celda_bold"]),
-        Paragraph("", estilos["celda"]),
-        Paragraph("", estilos["celda"]),
-        Paragraph("", estilos["celda"]),
-        Paragraph("", estilos["celda"]),
-        Paragraph("", estilos["celda"]),
-        Paragraph(_fmt_decimal(suma_total_mxn), estilos["celda_bold"]),
-        Paragraph("MXN",                        estilos["celda_bold"]),
-        Paragraph("", estilos["celda"]),
+        Paragraph(f"TOTAL  ({len(facturas)} facturas){nota_total}",
+                  estilos["celda_total"]),
+        Paragraph("", estilos["celda_total"]),
+        Paragraph("", estilos["celda_total"]),
+        Paragraph("", estilos["celda_total"]),
+        Paragraph(_fmt_decimal(suma_subtotal), estilos["celda_total"]),
+        Paragraph(_fmt_decimal(suma_iva),      estilos["celda_total"]),
+        Paragraph("", estilos["celda_total"]),
+        Paragraph("MXN",                       estilos["celda_total"]),
+        Paragraph(_fmt_decimal(suma_total_mxn), estilos["celda_total"]),
+        Paragraph("", estilos["celda_total"]),
     ]
 
     datos_tabla = encabezado_tabla + filas + [fila_total]

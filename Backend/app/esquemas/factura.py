@@ -17,6 +17,12 @@ class FacturaListado(BaseModel):
     rfc: str
     fecha: date
     numero_oc: str | None
+    # Las tres que usa la contabilidad del cliente, con su vocabulario:
+    # "Importe" es el subtotal del CFDI, "IVA" el impuesto trasladado y
+    # "Total" la suma. Venian solo en el detalle; el cliente las cuadra desde
+    # la tabla, asi que van tambien en el listado.
+    subtotal: Decimal | None = None
+    iva: Decimal | None = None
     total: Decimal | None
     tipo_cambio: Decimal | None = None
     moneda: str | None = None

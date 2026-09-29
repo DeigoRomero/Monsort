@@ -17,6 +17,8 @@ from collections import Counter, defaultdict
 from statistics import median
 from decimal import Decimal, InvalidOperation
 
+import unicodedata
+
 import openpyxl
 
 
@@ -32,6 +34,12 @@ COL_MONEDA       = 8
 COL_SUBTOTAL     = 9
 COL_IVA          = 10
 COL_TOTAL        = 11
+# La columna 12 cambia de significado a media hoja de calculo: en enero,
+# febrero y marzo su encabezado dice "FECHA PROBABLE" y viene vacia; de abril
+# en adelante dice "FECHA DE VALIDACION" / "FECHA VALIDACION" y trae 459
+# fechas capturadas a mano. Leerla siempre como "fecha probable" es lo que
+# hizo que la fecha de validacion del historico nunca llegara a la base, y
+# con ella el calculo de la fecha limite de pago.
 COL_FECHA_PROB   = 12
 COL_FECHA_LIQ    = 13
 COL_TIPO_CAMBIO  = 14
@@ -184,6 +192,14 @@ def detectar_cancelacion(fila_cruda):
 
 # ── Lectura ──────────────────────────────────────────────────────────────
 
+def _quitar_acentos(texto: str) -> str:
+    """VALIDACIÓN -> VALIDACION, para comparar encabezados escritos a mano."""
+    return "".join(
+        c for c in unicodedata.normalize("NFD", texto)
+        if unicodedata.category(c) != "Mn"
+    )
+
+
 def _texto(celdas, col):
     v = celdas.get(col)
     if v is None:
@@ -249,6 +265,11 @@ def leer_excel(ruta):
         if ws.title in HOJAS_IGNORADAS:
             continue
 
+        # Lo dice el encabezado de cada bloque, no el numero de hoja: asi
+        # sigue funcionando si el cliente cambia de criterio a media hoja o
+        # agrega meses nuevos.
+        col12_es_validacion = False
+
         for r in range(1, ws.max_row + 1):
             celdas = {
                 c: ws.cell(row=r, column=c).value
@@ -256,6 +277,9 @@ def leer_excel(ruta):
             }
 
             if _es_fila_header(celdas):
+                col12_es_validacion = "VALIDACION" in _quitar_acentos(
+                    _texto(celdas, COL_FECHA_PROB).upper()
+                )
                 continue
             if _es_ruido(celdas):
                 n_ruido += 1
@@ -318,7 +342,10 @@ def leer_excel(ruta):
                 "subtotal": limpiar_decimal(celdas.get(COL_SUBTOTAL)),
                 "iva": limpiar_decimal(celdas.get(COL_IVA)),
                 "total": total,
-                "fecha_probable": limpiar_fecha(celdas.get(COL_FECHA_PROB)),
+                "fecha_probable": (None if col12_es_validacion
+                                   else limpiar_fecha(celdas.get(COL_FECHA_PROB))),
+                "fecha_validacion": (limpiar_fecha(celdas.get(COL_FECHA_PROB))
+                                     if col12_es_validacion else None),
                 "fecha_liquidacion": limpiar_fecha(celdas.get(COL_FECHA_LIQ)),
                 "cancelada": cancelada,
                 "texto_cancelacion": texto_cancelacion,
@@ -514,7 +541,8 @@ def reportar(filas, rechazos, grupos, n_ruido=0, tabla_tc=None, orden_hojas=None
     _titulo("CALIDAD DE DATOS")
     total = len(filas) or 1
     campos = ["folio_interno", "numero_oc", "fecha", "total",
-              "subtotal", "iva", "fecha_probable", "fecha_liquidacion"]
+              "subtotal", "iva", "fecha_probable", "fecha_validacion",
+              "fecha_liquidacion"]
     for campo in campos:
         n = sum(1 for f in filas if f[campo] is not None)
         print(f"    {campo:<20} {n:>4} / {len(filas)}  ({100*n/total:>5.1f}%)")

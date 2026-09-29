@@ -17,6 +17,7 @@ router = APIRouter()
 @router.get("/general", tags=["Reportes"])
 def reporte_general(
     filtros: FiltrosFactura = Depends(),
+    solo_ciclo_completo: bool = False,
     db: Session = Depends(get_db),
 ):
     """
@@ -24,11 +25,19 @@ def reporte_general(
     Acepta los mismos query params que GET /facturas/:
       cliente, fecha_desde, fecha_hasta, numero_oc, q, con_cp
 
-    Solo incluye facturas con ciclo completo (OC + CP activo).
-    Convierte totales a MXN con el tipo_cambio del CFDI.
+    Devuelve lo mismo que devolveria el listado con esos filtros, incluido el
+    historico importado del Excel. Antes del 29/09/2026 se quedaba solo con
+    las facturas que tuvieran orden de compra Y complemento de pago, sin que
+    nada en la pantalla lo dijera: por eso un rango de fechas parecia no
+    funcionar.
+
+    solo_ciclo_completo=true recupera ese comportamiento, ahora explicito.
+
+    Columnas: Importe (subtotal del CFDI), IVA y Total, mas Total MXN con la
+    conversion por tipo de cambio.
     """
     try:
-        pdf_bytes = generar_reporte_general(db, filtros)
+        pdf_bytes = generar_reporte_general(db, filtros, solo_ciclo_completo)
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error generando reporte: {str(e)}")
 

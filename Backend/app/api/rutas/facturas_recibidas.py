@@ -1,3 +1,4 @@
+import logging
 from datetime import datetime, timedelta, timezone
 from math import ceil
 
@@ -5,7 +6,9 @@ from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Response
 from sqlalchemy.orm import Session, undefer
 
 from app.BaseDeDatos import get_db
+from app.core.dependencias import ROLES_ADMIN, requiere_roles
 from app.modelos.facturas_recibidas import FacturasRecibidas
+from app.modelos.usuario import Usuarios
 from app.esquemas.factura_recibida import (
     FacturaRecibidaListado,
     FacturaRecibidaDetalle,
@@ -23,6 +26,8 @@ from app.services.query_builder_recibidas import (
     calcular_resumen_recibidas,
     listar_emisores,
 )
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
@@ -167,6 +172,7 @@ def sincronizar_con_portal(
     datos: SincronizarPortalRequest,
     tareas: BackgroundTasks,
     db: Session = Depends(get_db),
+    usuario: Usuarios = Depends(requiere_roles(*ROLES_ADMIN)),
 ):
     """
     Consulta el portal del SAT AHORA, sin esperar al horario programado.
@@ -174,6 +180,11 @@ def sincronizar_con_portal(
     Responde de inmediato (202) y la consulta corre en segundo plano; tarda
     de segundos a un par de minutos. El resultado se ve en
     GET /facturas-recibidas/sincronizacion.
+
+    Requiere sesion y rol de administrador: esta llamada hace que el servidor
+    inicie sesion en el portal del SAT con la e.firma de Monsort. Es la
+    operacion mas delicada de la API — no puede quedar abierta a cualquiera
+    que conozca la URL.
     """
     from app.core.config import settings
     from app.modelos.sincronizacion_portal import SincronizacionesPortal
@@ -200,6 +211,13 @@ def sincronizar_con_portal(
             detail=f"Espera {MINUTOS_ENTRE_MANUALES} minutos entre sincronizaciones manuales",
         )
 
+    # Queda asentado quien la disparo: si el SAT bloquea la cuenta por
+    # exceso de accesos, la bitacora dice de donde vinieron.
+    logger.info(
+        "Sincronizacion manual con el portal del SAT pedida por %s (%s), %d dia(s)",
+        usuario.correo, usuario.rol, datos.dias,
+    )
+
     tareas.add_task(_correr_sincronizacion_manual, datos.dias)
     return {"mensaje": "Sincronizacion iniciada. Consulta el estado en unos minutos.", "dias": datos.dias}
 
@@ -212,9 +230,14 @@ def sincronizar_con_portal(
 def sincronizar_recibidas(
     datos: SincronizarRequest,
     db: Session = Depends(get_db),
+    usuario: Usuarios = Depends(requiere_roles(*ROLES_ADMIN)),
 ):
     """
     Registra una solicitud de descarga masiva para el rango indicado.
+
+    Protegida por lo mismo que la del portal: la solicitud se firma con la
+    e.firma, y las peticiones de tipo `cfdi` tienen limite de por vida por
+    periodo. Que un tercero las gaste no se puede deshacer.
 
     NO descarga nada de inmediato: el servicio del SAT es asincrono y
     puede tardar de minutos a horas. La solicitud queda en estado NUEVA

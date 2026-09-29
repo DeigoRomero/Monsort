@@ -42,16 +42,32 @@ class ConceptoDetalle(BaseModel):
 
 
 class ComplementoResumen(BaseModel):
-    """CP asociado a la factura, para la vista de detalle."""
+    """
+    CP asociado a la factura, para la vista de detalle.
+
+    Una factura puede tener varios: los pagos parciales generan un CP por
+    exhibicion, cada uno con su parcialidad. Por eso el detalle devuelve una
+    lista aunque casi siempre traiga un solo elemento.
+
+    `id` es el id del complemento, el que sirve para enlazar a
+    /complementos/{id}. `imp_pagado`, `imp_saldo_insoluto` y `num_parcialidad`
+    son de ESTE pago contra ESTA factura (el DoctoRelacionado), mientras que
+    `monto` es el total del CP, que puede cubrir varias facturas a la vez: por
+    eso `monto` y `imp_pagado` no tienen por que coincidir.
+    """
     model_config = ConfigDict(from_attributes=True)
 
     id: int
+    uuid_cp: str                  # folio fiscal del CP, cuando no hay folio
     folio: str | None
     fecha_pago: datetime | None
     monto: Decimal | None
     imp_pagado: Decimal | None
     imp_saldo_insoluto: Decimal | None
     num_parcialidad: int | None
+    # Mismo criterio que /complementos: saldo insoluto en cero. Con el saldo
+    # nulo no se afirma que liquida — no se sabe.
+    liquida: bool = False
 
 
 class FacturaDetalle(BaseModel):

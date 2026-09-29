@@ -5,6 +5,7 @@ import {
   obtenerFacturaRecibida,
   obtenerEstadoSincronizacion,
   listarHistorialSincronizacion,
+  iniciarSincronizacionPortal,
   descargarReporteRecibidas,
   urlXmlRecibida,
   type FacturaRecibidaListado,
@@ -17,6 +18,7 @@ import {
 } from "../api/facturas-recibidas";
 import { ApiError } from "../api/client";
 import "./Facturas.css";
+import { useAuth } from "../context/AuthContext";
 
 function formatMonto(valor?: string | null) {
   if (!valor) return "—";
@@ -142,7 +144,12 @@ export function FacturasRecibidas() {
   const [fechaHasta, setFechaHasta] = useState("");
 
   const [descargandoReporte, setDescargandoReporte] = useState(false);
-
+  const [sincronizando, setSincronizando] = useState(false);
+  const [errorSincronizacion, setErrorSincronizacion] = useState<string | null>(null);
+  const { session } = useAuth();
+  const rol = session?.usuario.rol?.toLowerCase() ?? "";
+  const puedeSincronizar = ["desarrollador", "administrador"].includes(rol);
+  
   useEffect(() => {
     listarEmisores().then(setEmisores).catch(() => {});
     obtenerEstadoSincronizacion().then(setSincronizacion).catch(() => {});
@@ -165,6 +172,43 @@ export function FacturasRecibidas() {
       pagina: paginaOverride ?? pagina,
       por_pagina: 50,
     };
+  }
+
+  async function handleSincronizarAhora() {
+    setSincronizando(true);
+    setErrorSincronizacion(null);
+    try {
+      await iniciarSincronizacionPortal(5);
+      // el servidor respondio 202: la consulta sigue en segundo plano.
+      // consultamos el estado cada 15s hasta que en_curso sea false.
+      const intervalo = setInterval(async () => {
+        try {
+          const estado = await obtenerEstadoSincronizacion();
+          setSincronizacion(estado);
+          if (!estado.en_curso) {
+            clearInterval(intervalo);
+            setSincronizando(false);
+            if (estado.ultima_corrida?.estado === "FALLIDA") {
+              setErrorSincronizacion(
+                estado.ultima_corrida.error ?? "La sincronización falló."
+              );
+            } else {
+              cargar(1);
+            }
+          }
+        } catch {
+          clearInterval(intervalo);
+          setSincronizando(false);
+        }
+      }, 15000);
+    } catch (err) {
+      setSincronizando(false);
+      if (err instanceof ApiError) {
+        setErrorSincronizacion(err.message);
+      } else {
+        setErrorSincronizacion("No se pudo iniciar la sincronización.");
+      }
+    }
   }
 
   function cargar(paginaObjetivo: number) {
@@ -219,6 +263,17 @@ export function FacturasRecibidas() {
           <h2 className="facturas-title">Facturas recibidas</h2>
         </div>
         <div style={{ display: "flex", gap: 10 }}>
+          {puedeSincronizar && (
+            <button
+              className="factura-btn-secondary"
+              onClick={handleSincronizarAhora}
+              disabled={sincronizando || sincronizacion?.en_curso}
+            >
+              {sincronizando || sincronizacion?.en_curso
+                ? "Consultando al SAT…"
+                : "Actualizar desde el SAT"}
+            </button>
+          )}
           <button
             className="factura-btn-secondary"
             onClick={() => setMostrarHistorial(true)}
@@ -236,6 +291,11 @@ export function FacturasRecibidas() {
       </div>
 
       <EncabezadoSincronizacion estado={sincronizacion} />
+      {errorSincronizacion && (
+        <p className="facturas-status facturas-status-error" style={{ margin: 0 }}>
+          {errorSincronizacion}
+        </p>
+      )}
 
       <p className="facturas-nota-historico">
         Este listado es de solo lectura — proviene directamente del SAT. Los datos no

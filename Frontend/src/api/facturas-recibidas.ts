@@ -4,32 +4,44 @@ export interface FacturaRecibidaListado {
   id_factura_recibida: number;
   folio_fiscal: string;
   rfc_emisor: string;
-  nombre_emisor: string;
-  fecha_emision: string;
-  monto_total: string;
   // null hasta que el SAT se consulta: la metadata del SAT no siempre trae
   // EstadoCFDI y las filas viejas nunca se verificaron. El backend siempre
   // pudo mandar null aqui; el tipo decia string y por eso tsc nunca marco
   // los .toLowerCase() sin guarda que dejaban la pagina en blanco.
+  nombre_emisor: string | null;
+  fecha_emision: string;
+  monto_total: string;
   sat_estado: string | null;
   efecto_comprobante: string | null;
   fecha_cancelacion: string | null;
+  tiene_xml: boolean;
 }
 
-export interface FacturaRecibidaDetalle extends FacturaRecibidaListado {
+export interface FacturaRecibidaDetalle {
+  id_factura_recibida: number;
+  folio_fiscal: string;
+  rfc_emisor: string;
+  nombre_emisor: string | null;
   rfc_receptor: string;
-  nombre_receptor: string;
-  rfc_pac: string;
+  nombre_receptor: string | null;
+  fecha_emision: string;
+  monto_total: string;
+  efecto_comprobante: string | null;
+  rfc_pac: string | null;
+  fecha_cancelacion: string | null;
   origen: string;
+  tiene_xml: boolean;
+  fecha_vista_portal: string | null;
+  sat_estado: string | null;
   sat_es_cancelable: string | null;
   sat_estatus_cancelacion: string | null;
   sat_codigo_estatus: string | null;
   sat_validacion_efos: string | null;
   fecha_ultima_verificacion_sat: string | null;
   intentos_verificacion_fallidos: number;
-  id_solicitud: number;
+  id_solicitud: number | null;
   creado_en: string;
-  actualizado_en: string;
+  actualizado_en: string | null;
 }
 
 export interface ResumenFacturasRecibidas {
@@ -50,7 +62,7 @@ export interface ListadoRecibidasResponse {
 
 export interface EmisorOpcion {
   rfc_emisor: string;
-  nombre_emisor: string;
+  nombre_emisor: string | null;
   total_facturas: number;
 }
 
@@ -67,6 +79,36 @@ export interface FiltrosRecibidas {
   monto_max?: number;
   pagina?: number;
   por_pagina?: number;
+}
+
+// ---------- Sincronizacion con el portal del SAT ----------
+
+export interface CorridaPortal {
+  id: number;
+  estado: string; // EN_CURSO | EXITOSA | FALLIDA
+  motivo: string; // programada | barrido | manual | cli
+  fecha_desde: string;
+  fecha_hasta: string;
+  inicio: string;
+  fin: string | null;
+  cfdis_encontrados: number | null;
+  nuevas: number | null;
+  actualizadas: number | null;
+  xml_descargados: number | null;
+  rechazadas: number | null;
+  tipo_error: string | null;
+  error: string | null;
+  avisos: string | null;
+}
+
+export interface EstadoSincronizacionPortal {
+  activo: boolean;
+  en_curso: boolean;
+  ultima_sincronizacion_exitosa: string | null;
+  horas_sin_sincronizar: number | null;
+  nuevas_ultimas_24h: number;
+  alerta: string | null;
+  ultima_corrida: CorridaPortal | null;
 }
 
 function buildQuery(filtros: FiltrosRecibidas): string {
@@ -111,16 +153,30 @@ export function obtenerFacturaRecibida(id: number): Promise<FacturaRecibidaDetal
   return apiFetch<FacturaRecibidaDetalle>(`/facturas-recibidas/${id}`);
 }
 
-export interface SincronizarRequest {
-  fecha_inicial: string;
-  fecha_final: string;
+export function obtenerEstadoSincronizacion(): Promise<EstadoSincronizacionPortal> {
+  return apiFetch<EstadoSincronizacionPortal>("/facturas-recibidas/sincronizacion");
 }
 
-export function sincronizarRecibidas(datos: SincronizarRequest): Promise<unknown> {
-  return apiFetch<unknown>("/facturas-recibidas/sincronizar", {
+export function listarHistorialSincronizacion(
+  limite = 20
+): Promise<CorridaPortal[]> {
+  return apiFetch<CorridaPortal[]>(
+    `/facturas-recibidas/sincronizacion/historial?limite=${limite}`
+  );
+}
+
+// Pendiente de conectar: Diego va a proteger esta ruta con autenticacion
+// porque dispara la entrada al SAT con la e.firma de Monsort. Cuando avise,
+// se llama igual pero mandando el token de sesion.
+export function iniciarSincronizacionPortal(dias = 5): Promise<unknown> {
+  return apiFetch<unknown>("/facturas-recibidas/sincronizacion", {
     method: "POST",
-    body: JSON.stringify(datos),
+    body: JSON.stringify({ dias }),
   });
+}
+
+export function urlXmlRecibida(id: number): string {
+  return `${API_URL}/facturas-recibidas/${id}/xml`;
 }
 
 async function descargarPdf(url: string, nombreArchivo: string) {

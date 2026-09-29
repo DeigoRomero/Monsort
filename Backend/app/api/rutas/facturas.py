@@ -200,30 +200,36 @@ def obtener_factura(id_factura: int, db: Session = Depends(get_db)):
         for c in f.conceptos
     ]
 
+    # Una sola consulta con el CP adentro. Antes se traian los documentos y
+    # luego se pedia el CP de cada uno por separado: con tres pagos parciales
+    # eran cuatro idas a la base para una pantalla de detalle.
     docs = (
-        db.query(CPDocumentosRelacionados)
+        db.query(CPDocumentosRelacionados, ComplementosPago)
         .join(ComplementosPago,
               CPDocumentosRelacionados.id_complemento == ComplementosPago.id)
         .filter(
             CPDocumentosRelacionados.id_factura == id_factura,
             ComplementosPago.cancelado == False,   # noqa: E712
         )
+        .order_by(CPDocumentosRelacionados.num_parcialidad.asc().nullslast(),
+                  ComplementosPago.fecha_pago.asc().nullslast())
         .all()
     )
 
-    complementos = []
-    for d in docs:
-        cp = db.query(ComplementosPago).filter(ComplementosPago.id == d.id_complemento).first()
-        if cp:
-            complementos.append(ComplementoResumen(
-                id=cp.id,
-                folio=cp.folio,
-                fecha_pago=cp.fecha_pago,
-                monto=cp.monto,
-                imp_pagado=d.imp_pagado,
-                imp_saldo_insoluto=d.imp_saldo_insoluto,
-                num_parcialidad=d.num_parcialidad,
-            ))
+    complementos = [
+        ComplementoResumen(
+            id=cp.id,
+            uuid_cp=cp.uuid_cp,
+            folio=cp.folio,
+            fecha_pago=cp.fecha_pago,
+            monto=cp.monto,
+            imp_pagado=d.imp_pagado,
+            imp_saldo_insoluto=d.imp_saldo_insoluto,
+            num_parcialidad=d.num_parcialidad,
+            liquida=d.imp_saldo_insoluto is not None and d.imp_saldo_insoluto == 0,
+        )
+        for d, cp in docs
+    ]
 
     orden_compra = None
     if f.orden_compra:

@@ -1,6 +1,20 @@
 // Base URL for the FastAPI backend. Configure in a .env file as VITE_API_URL.
 // Falls back to the local dev server if not set.
 export const API_URL = import.meta.env.VITE_API_URL ?? "http://localhost:8000";
+
+const STORAGE_KEY = "monsort.session";
+
+function obtenerAccessToken(): string | null {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY);
+    if (!raw) return null;
+    const session = JSON.parse(raw) as { accessToken?: string };
+    return session.accessToken ?? null;
+  } catch {
+    return null;
+  }
+}
+
 export class ApiError extends Error {
   status: number;
   constructor(status: number, message: string) {
@@ -18,11 +32,14 @@ export async function apiFetch<T>(
   path: string,
   options: RequestInit = {}
 ): Promise<T> {
+  const token = obtenerAccessToken();
+
   const response = await fetch(`${API_URL}${path}`, {
     ...options,
     headers: {
       "ngrok-skip-browser-warning": "true",
       "Content-Type": "application/json",
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
       ...options.headers,
     },
   });

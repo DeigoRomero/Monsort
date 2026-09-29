@@ -13,6 +13,7 @@ import {
   descargarReporteDetalle,
   type FacturaListado,
   type FacturaDetalle as FacturaDetalleType,
+  type ComplementoResumen,
   type OrdenCompraCandidata,
   type FiltrosFacturas,
   type ResumenFacturas,
@@ -651,6 +652,8 @@ function FacturaDetalleView({
               Recibida el {factura.orden_compra.fecha_recepcion.slice(0, 10)}
             </p>
           </div>
+
+
         ) : (
           <p
             className="facturas-status"
@@ -723,6 +726,43 @@ function FacturaDetalleView({
           </div>
         )}
       </div>
+
+            {factura.complementos.length > 0 && (
+        <div className="factura-detalle-oc">
+          <label className="factura-detalle-label">
+            Complemento{factura.complementos.length > 1 ? "s" : ""} de pago vinculado
+            {factura.complementos.length > 1 ? "s" : ""}
+          </label>
+          <div className="factura-candidatas">
+            {factura.complementos.map((cp) => (
+              <div key={cp.id} className="factura-candidata-card">
+                <div>
+                  <p style={{ margin: "0 0 3px", fontWeight: 600, fontSize: 13.5, color: "var(--text-ink)" }}>
+                    {cp.folio ?? cp.uuid_cp.slice(0, 8) + "…"}
+                    {cp.num_parcialidad && (
+                      <span style={{ fontWeight: 400, color: "var(--text-muted)", marginLeft: 6 }}>
+                        parcialidad {cp.num_parcialidad}
+                      </span>
+                    )}
+                  </p>
+                  <p style={{ margin: 0, fontSize: 12, color: "var(--text-muted)" }}>
+                    {cp.fecha_pago ? cp.fecha_pago.slice(0, 10) : "sin fecha"} · pagado $
+                    {cp.imp_pagado?.toLocaleString("es-MX", { minimumFractionDigits: 2 }) ?? "—"}
+                    {cp.imp_saldo_insoluto !== null && (
+                      <> · saldo ${cp.imp_saldo_insoluto.toLocaleString("es-MX", { minimumFractionDigits: 2 })}</>
+                    )}
+                  </p>
+                </div>
+                {cp.liquida && (
+                  <span className="factura-badge" style={{ background: "#e5f0e8", color: "#2e7d5b" }}>
+                    Liquidada
+                  </span>
+                )}
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
 
       <div className="factura-detalle-archivo">
         <label className="factura-detalle-label">Archivo</label>

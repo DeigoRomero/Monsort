@@ -80,6 +80,18 @@ export interface OrdenCompraCandidata {
   facturas_asociadas: number;
 }
 
+export interface ComplementoResumen {
+  id: number;
+  uuid_cp: string;
+  folio: string | null;
+  fecha_pago: string | null;
+  monto: number | null;
+  imp_pagado: number | null;
+  imp_saldo_insoluto: number | null;
+  num_parcialidad: number | null;
+  liquida: boolean;
+}
+
 export interface FacturaDetalle {
   id_factura: number;
   folio_fiscal: string;
@@ -100,6 +112,7 @@ export interface FacturaDetalle {
   orden_compra: OrdenCompraInfo | null;
   tiene_pdf: boolean;
   tiene_xml: boolean;
+  complementos: ComplementoResumen[];
 }
 
 export interface FacturaActualizar {

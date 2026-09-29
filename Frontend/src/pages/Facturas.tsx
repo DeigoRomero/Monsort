@@ -13,7 +13,6 @@ import {
   descargarReporteDetalle,
   type FacturaListado,
   type FacturaDetalle as FacturaDetalleType,
-  type ComplementoResumen,
   type OrdenCompraCandidata,
   type FiltrosFacturas,
   type ResumenFacturas,

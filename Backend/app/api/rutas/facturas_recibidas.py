@@ -6,6 +6,7 @@ from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Response
 from sqlalchemy.orm import Session, undefer
 
 from app.BaseDeDatos import get_db
+from app.core.descargas import respuesta_archivo
 from app.core.dependencias import ROLES_ADMIN, requiere_roles
 from app.modelos.facturas_recibidas import FacturasRecibidas
 from app.modelos.usuario import Usuarios
@@ -312,8 +313,5 @@ def descargar_xml_recibida(
     if not f.xml_factura:
         raise HTTPException(status_code=404, detail="Esta factura todavia no tiene XML")
 
-    return Response(
-        content=f.xml_factura,
-        media_type="application/xml",
-        headers={"Content-Disposition": f'attachment; filename="{f.folio_fiscal}.xml"'},
-    )
+    return respuesta_archivo(f.xml_factura, f.folio_fiscal, respaldo=f"recibida_{id_factura_recibida}",
+                             media_type="application/xml", extension=".xml", inline=False)

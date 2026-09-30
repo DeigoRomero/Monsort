@@ -7,7 +7,7 @@ import {
   listarHistorialSincronizacion,
   iniciarSincronizacionPortal,
   descargarReporteRecibidas,
-  urlXmlRecibida,
+  descargarXmlRecibida,
   type FacturaRecibidaListado,
   type FacturaRecibidaDetalle,
   type ResumenFacturasRecibidas,
@@ -16,6 +16,7 @@ import {
   type EstadoSincronizacionPortal,
   type CorridaPortal,
 } from "../api/facturas-recibidas";
+import { ArchivoLink } from "../Components/ArchivoLink";
 import { ApiError } from "../api/client";
 import "./Facturas.css";
 import { useAuth } from "../context/AuthContext";
@@ -438,13 +439,13 @@ export function FacturasRecibidas() {
                   </td>
                   <td>
                     {f.tiene_xml ? (
-                      <a
+                      <ArchivoLink
                         className="recibidas-xml-link"
-                        href={urlXmlRecibida(f.id_factura_recibida)}
-                        onClick={(e) => e.stopPropagation()}
+                        accion={() => descargarXmlRecibida(f.id_factura_recibida)}
+                        detenerClic
                       >
                         Descargar
-                      </a>
+                      </ArchivoLink>
                     ) : (
                       <span style={{ color: "#c4cad6", fontSize: 12 }}>—</span>
                     )}
@@ -727,13 +728,16 @@ function FacturaRecibidaDetalleView({
       <div className="factura-detalle-archivo">
         <label className="factura-detalle-label">Archivo</label>
         {factura.tiene_xml ? (
-          <a className="factura-file-card" href={urlXmlRecibida(factura.id_factura_recibida)}>
+          <ArchivoLink
+            className="factura-file-card"
+            accion={() => descargarXmlRecibida(factura.id_factura_recibida)}
+          >
             <span className="factura-file-icon">XML</span>
             <div>
               <p className="factura-file-name">{factura.folio_fiscal.slice(0, 8)}….xml</p>
               <p className="factura-file-action">Descargar archivo</p>
             </div>
-          </a>
+          </ArchivoLink>
         ) : (
           <p
             className="facturas-status"

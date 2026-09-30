@@ -1,4 +1,4 @@
-import { apiFetch, API_URL } from "./client";
+import { apiFetch, descargarArchivo } from "./client";
 
 // Mirrors Backend/app/esquemas/complemento.py
 
@@ -153,10 +153,10 @@ export function reconciliarComplementos(): Promise<unknown> {
   return apiFetch<unknown>("/complementos/reconciliar", { method: "POST" });
 }
 
-export function urlPdfComplemento(id: number): string {
-  return `${API_URL}/complementos/${id}/pdf`;
+export function abrirPdfComplemento(id: number) {
+  return descargarArchivo(`/complementos/${id}/pdf`, `CP_${id}.pdf`, "abrir");
 }
 
-export function urlXmlComplemento(id: number): string {
-  return `${API_URL}/complementos/${id}/xml`;
+export function descargarXmlComplemento(id: number) {
+  return descargarArchivo(`/complementos/${id}/xml`, `CP_${id}.xml`);
 }

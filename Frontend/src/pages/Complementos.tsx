@@ -4,14 +4,15 @@ import {
   listarHuerfanos,
   obtenerComplemento,
   reconciliarComplementos,
-  urlPdfComplemento,
-  urlXmlComplemento,
+  abrirPdfComplemento,
+  descargarXmlComplemento,
   type ComplementoListado,
   type ComplementoDetalle,
   type ResumenComplementos,
   type DocumentoHuerfano,
   type FiltrosComplemento,
 } from "../api/complementos";
+import { ArchivoLink } from "../Components/ArchivoLink";
 import { ApiError } from "../api/client";
 import "./Facturas.css";
 
@@ -569,32 +570,28 @@ function ComplementoDetalleView({
           <label className="factura-detalle-label">Archivos</label>
           <div style={{ display: "flex", gap: 12 }}>
             {cp.tiene_pdf && (
-              <a
+              <ArchivoLink
                 className="factura-file-card"
-                href={urlPdfComplemento(cp.id)}
-                target="_blank"
-                rel="noreferrer"
+                accion={() => abrirPdfComplemento(cp.id)}
               >
                 <span className="factura-file-icon">PDF</span>
                 <div>
                   <p className="factura-file-name">Ver complemento</p>
                   <p className="factura-file-action">Abrir documento</p>
                 </div>
-              </a>
+              </ArchivoLink>
             )}
             {cp.tiene_xml && (
-              <a
+              <ArchivoLink
                 className="factura-file-card"
-                href={urlXmlComplemento(cp.id)}
-                target="_blank"
-                rel="noreferrer"
+                accion={() => descargarXmlComplemento(cp.id)}
               >
                 <span className="factura-file-icon">XML</span>
                 <div>
                   <p className="factura-file-name">Descargar XML</p>
                   <p className="factura-file-action">Archivo original</p>
                 </div>
-              </a>
+              </ArchivoLink>
             )}
           </div>
         </div>

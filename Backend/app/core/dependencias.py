@@ -27,7 +27,7 @@ usuario es la verdad del momento.
 """
 import logging
 
-from fastapi import Depends, HTTPException, status
+from fastapi import Depends, HTTPException, Request, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from sqlalchemy.orm import Session
 
@@ -39,6 +39,7 @@ logger = logging.getLogger(__name__)
 
 # Los mismos que el frontend usa para mostrar "+ Crear usuario".
 ROLES_ADMIN = ("desarrollador", "administrador")
+ROLES_VALIDOS = ("desarrollador", "administrador", "empleado")
 
 # auto_error=False para devolver un 401 con mensaje propio en vez del 403
 # generico de FastAPI cuando falta el encabezado.
@@ -59,7 +60,7 @@ def usuario_actual(
     if credenciales is None or not credenciales.credentials:
         raise NO_AUTORIZADO
 
-    datos = decode_token(credenciales.credentials)
+    datos = decode_token(credenciales.credentials, tipo="access")
     if not datos:
         # decode_token devuelve None tanto para un token vencido como para uno
         # alterado. Para el cliente son el mismo caso: iniciar sesion de nuevo.
@@ -75,7 +76,25 @@ def usuario_actual(
         logger.warning("Token valido de un usuario inexistente: %s", correo)
         raise NO_AUTORIZADO
 
+    if not usuario.activo:
+        raise NO_AUTORIZADO
+
+    # Cerrar sesion o cambiar la contraseña sube sesion_version: los tokens
+    # emitidos antes dejan de servir aunque no hayan expirado.
+    if int(datos.get("ver", -1)) != int(usuario.sesion_version or 0):
+        raise NO_AUTORIZADO
+
     return usuario
+
+
+def ip_cliente(request: Request) -> str:
+    """
+    IP real del cliente. uvicorn corre con --proxy-headers y
+    --forwarded-allow-ips=127.0.0.1, asi que request.client ya trae la IP
+    que nginx puso en X-Forwarded-For (y un cliente no puede falsificarla
+    porque solo se confia en el proxy local).
+    """
+    return (request.client.host if request.client else "") or "desconocida"
 
 
 def requiere_roles(*roles: str):

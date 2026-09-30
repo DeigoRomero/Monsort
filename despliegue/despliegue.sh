@@ -92,6 +92,16 @@ npm run build || fallo "El build de Vite fallo"
 [[ -f "$RAIZ/Frontend/dist/index.html" ]] || fallo "No se genero dist/index.html"
 verde "  dist/ generado"
 
+# nginx sirve desde /var/www/monsort, NO desde el dist del repo. Sin esta
+# copia el despliegue decia "completo" y la pagina seguia igual.
+azul "Publicando el frontend en /var/www/monsort"
+sudo rsync -a --delete "$RAIZ/Frontend/dist/" /var/www/monsort/ \
+    || fallo "No se pudo copiar dist/ a /var/www/monsort"
+PUBLICADO=$(grep -o 'index-[A-Za-z0-9_-]*\.js' /var/www/monsort/index.html | head -1)
+CONSTRUIDO=$(grep -o 'index-[A-Za-z0-9_-]*\.js' "$RAIZ/Frontend/dist/index.html" | head -1)
+[[ "$PUBLICADO" == "$CONSTRUIDO" ]] || fallo "El index publicado ($PUBLICADO) no es el construido ($CONSTRUIDO)"
+verde "  publicado: $PUBLICADO"
+
 # ---------------------------------------------------------------- servicios
 
 azul "Reiniciando la API"

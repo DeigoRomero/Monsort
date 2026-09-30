@@ -4,7 +4,7 @@ import { Login } from "./pages/Login";
 import { Dashboard } from "./pages/Dashboard";
 
 function Screens() {
-  const { session } = useAuth();
+  const { session, isRestoring } = useAuth();
   const [showDashboard, setShowDashboard] = useState(false);
 
   useEffect(() => {
@@ -15,6 +15,9 @@ function Screens() {
     const id = window.setTimeout(() => setShowDashboard(true), 480);
     return () => window.clearTimeout(id);
   }, [session]);
+
+  // Mientras se revisa si hay sesión (cookie), no parpadear el login.
+  if (isRestoring) return null;
 
   if (session && showDashboard) return <Dashboard />;
 

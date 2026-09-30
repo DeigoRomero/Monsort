@@ -141,6 +141,14 @@ def construir_query_facturas(db: Session, filtros: FiltrosFactura):
     return q
 
 
+def _en_mxn(columna):
+    """Monto convertido a MXN con el tipo de cambio de la propia factura."""
+    return case(
+        (or_(Facturas.moneda == "MXN", Facturas.tipo_cambio.is_(None)), columna),
+        else_=columna * Facturas.tipo_cambio,
+    )
+
+
 def calcular_resumen(db: Session, filtros: FiltrosFactura) -> ResumenFacturas:
     """
     Corre una sola consulta de agregación sobre el mismo criterio
@@ -168,6 +176,16 @@ def calcular_resumen(db: Session, filtros: FiltrosFactura) -> ResumenFacturas:
             ),
             Decimal("0")
         ).label("total_mxn"),
+
+        # Total facturado = IMPORTE (subtotal, sin IVA) en MXN
+        func.coalesce(
+            func.sum(_en_mxn(Facturas.subtotal)), Decimal("0")
+        ).label("importe_mxn"),
+
+        func.coalesce(
+            func.sum(case((Facturas.origen == "excel", _en_mxn(Facturas.subtotal)))),
+            Decimal("0")
+        ).label("importe_mxn_historico"),
 
         func.count(
             case((Facturas.origen == "excel", Facturas.id_factura))
@@ -212,6 +230,8 @@ def calcular_resumen(db: Session, filtros: FiltrosFactura) -> ResumenFacturas:
     return ResumenFacturas(
         total_facturas=total_facturas,
         total_mxn=total_mxn,
+        importe_mxn=resultado.importe_mxn or Decimal("0"),
+        importe_mxn_historico=resultado.importe_mxn_historico or Decimal("0"),
         total_con_cp=total_con_cp,
         total_sin_cp=total_facturas - total_con_cp,
         total_canceladas=total_canceladas,

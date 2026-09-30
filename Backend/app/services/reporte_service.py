@@ -35,14 +35,23 @@ LOGO_PATH = os.path.join(
 
 # ─── Helpers ───────────────────────────────────────────────────────────────
 
-def _total_mxn(factura) -> Decimal | None:
-    if factura.total is None:
+def _a_mxn(monto, factura) -> Decimal | None:
+    if monto is None:
         return Decimal("0")
     if factura.tipo_cambio is None:
         return None   # único caso sin conversión posible
-    return (Decimal(str(factura.total)) * Decimal(str(factura.tipo_cambio))).quantize(
+    return (Decimal(str(monto)) * Decimal(str(factura.tipo_cambio))).quantize(
         Decimal("0.01"), rounding=ROUND_HALF_UP
     )
+
+
+def _total_mxn(factura) -> Decimal | None:
+    return _a_mxn(factura.total, factura)
+
+
+def _importe_mxn(factura) -> Decimal | None:
+    """Importe (subtotal del CFDI, sin IVA) en MXN: base del 'total facturado'."""
+    return _a_mxn(factura.subtotal, factura)
 
 
 def _fmt_decimal(valor) -> str:
@@ -256,8 +265,10 @@ def generar_reporte_general(db: Session, filtros: FiltrosFactura,
                   1.4*cm, 2.3*cm, 1.8*cm]
 
     # El orden y los nombres son los de la contabilidad del cliente:
-    # Importe (subtotal del CFDI), IVA, Total. "Total MXN" es la conversion
-    # con el tipo de cambio, que solo difiere en moneda extranjera.
+    # Importe (subtotal del CFDI), IVA, Total. "Importe MXN" es el importe
+    # convertido con el tipo de cambio: el TOTAL FACTURADO del reporte se
+    # suma sobre el importe, no sobre el total con IVA (pedido del cliente,
+    # 30/09/2026).
     encabezado_tabla = [[
         Paragraph("UUID / Folio Fiscal",  estilos["encabezado_tabla"]),
         Paragraph("Folio Interno",        estilos["encabezado_tabla"]),
@@ -267,12 +278,13 @@ def generar_reporte_general(db: Session, filtros: FiltrosFactura,
         Paragraph("IVA",                  estilos["encabezado_tabla"]),
         Paragraph("Total",                estilos["encabezado_tabla"]),
         Paragraph("Moneda",               estilos["encabezado_tabla"]),
-        Paragraph("Total MXN",            estilos["encabezado_tabla"]),
+        Paragraph("Importe MXN",          estilos["encabezado_tabla"]),
         Paragraph("Fecha",                estilos["encabezado_tabla"]),
     ]]
 
     filas          = []
-    suma_total_mxn = Decimal("0")
+    suma_total_mxn = Decimal("0")     # con IVA, solo como referencia al pie
+    suma_importe_mxn = Decimal("0")   # TOTAL FACTURADO
     # Importe e IVA se suman en su moneda original y solo cuando TODO el
     # reporte es de una sola moneda: sumar pesos con dolares da un numero que
     # no significa nada. Si hay mezcla, esas celdas van vacias.
@@ -285,6 +297,7 @@ def generar_reporte_general(db: Session, filtros: FiltrosFactura,
         conceptos    = db.query(Conceptos).filter(Conceptos.id_factura == f.id_factura).all()
         descripcion  = _descripcion_conceptos(conceptos)
         total_mxn    = _total_mxn(f)
+        importe_mxn  = _importe_mxn(f)
 
         monedas.add((f.moneda or "MXN").upper())
         if f.subtotal is not None:
@@ -292,14 +305,15 @@ def generar_reporte_general(db: Session, filtros: FiltrosFactura,
         if f.iva is not None:
             suma_iva += Decimal(str(f.iva))
 
-        if total_mxn is not None:
-            suma_total_mxn += total_mxn
-            celda_total = Paragraph(_fmt_decimal(total_mxn), estilos["celda"])
+        if importe_mxn is not None:
+            suma_importe_mxn += importe_mxn
+            suma_total_mxn += total_mxn or Decimal("0")
+            celda_total = Paragraph(_fmt_decimal(importe_mxn), estilos["celda"])
         else:
             # Moneda extranjera sin tipo de cambio
             hay_sin_conv = True
             celda_total  = Paragraph(
-                f"{_fmt_decimal(f.total)} ({f.moneda or '?'})*",
+                f"{_fmt_decimal(f.subtotal)} ({f.moneda or '?'})*",
                 estilos["celda"],
             )
 
@@ -331,7 +345,7 @@ def generar_reporte_general(db: Session, filtros: FiltrosFactura,
         Paragraph(_fmt_decimal(suma_iva),      estilos["celda_total"]),
         Paragraph("", estilos["celda_total"]),
         Paragraph("MXN",                       estilos["celda_total"]),
-        Paragraph(_fmt_decimal(suma_total_mxn), estilos["celda_total"]),
+        Paragraph(_fmt_decimal(suma_importe_mxn), estilos["celda_total"]),
         Paragraph("", estilos["celda_total"]),
     ]
 
@@ -347,12 +361,19 @@ def generar_reporte_general(db: Session, filtros: FiltrosFactura,
     tabla.setStyle(estilo)
     story.append(tabla)
 
+    story.append(Spacer(1, 0.3*cm))
+    story.append(Paragraph(
+        f"<b>Total facturado (importe, sin IVA): {_fmt_decimal(suma_importe_mxn)} MXN</b>"
+        f" &nbsp;·&nbsp; Total con IVA: {_fmt_decimal(suma_total_mxn)} MXN",
+        estilos["celda"],
+    ))
+
     # Nota al pie si hay facturas sin tipo de cambio
     if hay_sin_conv:
         story.append(Spacer(1, 0.3*cm))
         story.append(Paragraph(
             "* Factura en moneda extranjera sin tipo de cambio registrado. "
-            "El monto se muestra en su moneda original y no se incluye en el total MXN. "
+            "El importe se muestra en su moneda original y no se incluye en el total MXN. "
             "Capture el tipo de cambio desde el dashboard para incluirla en futuros reportes.",
             estilos["nota"],
         ))

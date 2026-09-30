@@ -17,9 +17,18 @@ logger = logging.getLogger(__name__)
 
 
 def job_procesar_correos():
+    """
+    Revisión de Gmail cada 5 minutos. Al terminar deja una notificación con
+    lo que cambió (facturas, OCs, CPs, vínculos, fallos) para la pantalla.
+    """
+    from app.services.notificacion_service import instantanea, registrar_revision_gmail
+
     db = SessionLocal()
     try:
-        procesar_correos_nuevos(db)
+        antes = instantanea(db)
+        resultado = procesar_correos_nuevos(db)
+        if not (resultado or {}).get("error"):
+            registrar_revision_gmail(db, antes)
     except Exception:
         logger.exception("Error en el job de procesar correos")
     finally:
@@ -40,8 +49,15 @@ def job_reprocesar_fallidos():
         if not pendientes:
             return
 
+        from app.services.notificacion_service import instantanea, registrar_revision_gmail
+
         logger.info("Reproceso de correos: %d pendiente(s) en cola", pendientes)
+        antes = instantanea(db)
         reprocesar_fallidos(db, limite=40)
+        # Lo que el reproceso recupere también se avisa. Los fallos de este
+        # ciclo no cuentan como "nuevos" (son reintentos de los mismos).
+        antes["id_fallido"] = instantanea(db)["id_fallido"]
+        registrar_revision_gmail(db, antes)
     except Exception:
         logger.exception("Error en el job de reproceso de correos fallidos")
     finally:
@@ -64,6 +80,14 @@ def job_verificar_sat():
                 "Facturas canceladas por el SAT: %s",
                 ", ".join(resumen["canceladas_detectadas"]),
             )
+            from app.services.notificacion_service import crear
+            n = len(resumen["canceladas_detectadas"])
+            crear(
+                db, tipo="sat", nivel="aviso", seccion="facturas",
+                titulo=f"SAT: {n} factura{'s' if n != 1 else ''} cancelada{'s' if n != 1 else ''}",
+                detalle=", ".join(resumen["canceladas_detectadas"][:20]),
+            )
+            db.commit()
         if resumen["abortado_por_circuit_breaker"]:
             logger.error("Verificación SAT abortada por circuit breaker")
     except Exception:
@@ -174,6 +198,27 @@ def job_portal_barrido():
 ZONA_MEXICO = ZoneInfo("America/Mexico_City")
 
 scheduler = BackgroundScheduler()
+
+
+def job_purgar_notificaciones():
+    from app.services.notificacion_service import purgar_viejas
+    db = SessionLocal()
+    try:
+        purgar_viejas(db)
+    finally:
+        db.close()
+
+
+scheduler.add_job(
+    job_purgar_notificaciones,
+    "cron",
+    hour=4,
+    minute=10,
+    id="purgar_notificaciones",
+    max_instances=1,
+    coalesce=True,
+    misfire_grace_time=3600,
+)
 
 scheduler.add_job(
     job_procesar_correos,

@@ -2,11 +2,38 @@ import { useEffect, useState } from "react";
 import {
   listarOrdenes,
   actualizarOrden,
-  urlArchivoOC,
+  abrirArchivoOC,
   type OrdenCompra,
 } from "../api/ordenes-compra";
 import { ApiError } from "../api/client";
+import { ArchivoLink } from "../Components/ArchivoLink";
 import "./Facturas.css";
+
+/**
+ * Qué tan seguro estuvo el detector con el número (30/09/2026).
+ * Solo se destaca lo que conviene revisar; lo confiable no hace ruido.
+ */
+function ConfianzaBadge({ confianza, numero }: { confianza: string | null; numero: string | null }) {
+  if (!numero) {
+    return (
+      <span className="factura-badge" style={{ background: "#fbe7e7", color: "#a33b3b", marginLeft: 8 }}>
+        Capturar número
+      </span>
+    );
+  }
+  if (confianza === "baja" || confianza === "ninguna") {
+    return (
+      <span
+        className="factura-badge"
+        style={{ background: "#fdf1de", color: "#8a6d1f", marginLeft: 8 }}
+        title="El número salió solo del nombre del archivo. Confírmalo contra el PDF."
+      >
+        Revisar
+      </span>
+    );
+  }
+  return null;
+}
 
 export function OrdenesCompra() {
   const [ordenes, setOrdenes] = useState<OrdenCompra[]>([]);
@@ -89,7 +116,10 @@ export function OrdenesCompra() {
                 className="facturas-row"
                 onClick={() => setSeleccionada(o)}
               >
-                <td className="facturas-cell-strong">{o.numero_oc}</td>
+                <td className="facturas-cell-strong">
+                  {o.numero_oc ?? <span style={{ color: "#8a92a5" }}>Sin número</span>}
+                  <ConfianzaBadge confianza={o.confianza_oc} numero={o.numero_oc} />
+                </td>
                 <td className="facturas-cell-muted">
                   {o.nombre_archivo ?? "—"}
                 </td>
@@ -138,7 +168,7 @@ function DetalleOC({
   onVolver: () => void;
   onGuardado: (actualizada: OrdenCompra) => void;
 }) {
-  const [numeroOc, setNumeroOc] = useState(oc.numero_oc);
+  const [numeroOc, setNumeroOc] = useState(oc.numero_oc ?? "");
   const [isSaving, setIsSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [guardadoOk, setGuardadoOk] = useState(false);
@@ -171,7 +201,8 @@ function DetalleOC({
           ← Volver
         </span>
         <span className="factura-detalle-divider">|</span>
-        <h2 className="factura-detalle-title">OC {oc.numero_oc}</h2>
+        <h2 className="factura-detalle-title">OC {oc.numero_oc ?? "sin número"}</h2>
+        <ConfianzaBadge confianza={oc.confianza_oc} numero={oc.numero_oc} />
         {oc.sin_factura_30_dias && (
           <span
             className="factura-badge"
@@ -221,20 +252,18 @@ function DetalleOC({
       {oc.tiene_archivo && (
         <div className="factura-detalle-archivo">
           <label className="factura-detalle-label">Archivo adjunto</label>
-          <a
+          <ArchivoLink
             className="factura-file-card"
-            href={urlArchivoOC(oc.id)}
-            target="_blank"
-            rel="noreferrer"
+            accion={() => abrirArchivoOC(oc.id)}
           >
             <span className="factura-file-icon">OC</span>
             <div>
               <p className="factura-file-name">
                 {oc.nombre_archivo ?? `orden_${oc.id}`}
               </p>
-              <p className="factura-file-action">Descargar archivo</p>
+              <p className="factura-file-action">Abrir archivo</p>
             </div>
-          </a>
+          </ArchivoLink>
         </div>
       )}
 

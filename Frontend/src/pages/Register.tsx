@@ -1,5 +1,5 @@
 import { useState, type FormEvent } from "react";
-import { registro } from "../api/auth";
+import { problemaPassword, registro } from "../api/auth";
 import { ApiError } from "../api/client";
 import "./Register.css";
 
@@ -23,6 +23,12 @@ export function Register({ onCancelar }: RegisterProps) {
 
     if (password !== confirmPassword) {
       setError("Las contraseñas no coinciden.");
+      return;
+    }
+    // Mismas reglas que el backend; aquí solo para avisar antes de enviar.
+    const problema = problemaPassword(password, correo);
+    if (problema) {
+      setError(`Contraseña: ${problema}`);
       return;
     }
 
@@ -133,7 +139,7 @@ export function Register({ onCancelar }: RegisterProps) {
             required
             value={password}
             onChange={(e) => setPassword(e.target.value)}
-            placeholder="••••••••"
+            placeholder="Mínimo 12 caracteres"
           />
         </label>
 

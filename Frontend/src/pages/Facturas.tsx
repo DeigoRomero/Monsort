@@ -8,7 +8,7 @@ import {
   actualizarFactura,
   cancelarFactura,
   verificarSat,
-  urlPdfFactura,
+  abrirPdfFactura,
   descargarReporteGeneral,
   descargarReporteDetalle,
   type FacturaListado,
@@ -21,6 +21,7 @@ import {
 } from "../api/facturas";
 import { ApiError } from "../api/client";
 import { CancelarModal } from "../Components/CancelarModal";
+import { ArchivoLink } from "../Components/ArchivoLink";
 import "./Facturas.css";
 
 function estiloEstado(nombre: string) {
@@ -43,21 +44,49 @@ function EstadoBadge({ nombre }: { nombre: string }) {
   );
 }
 
-function AlertaVencimiento({
+/**
+ * Días que faltan para la fecha límite de pago (antes decía solo
+ * "Vigente / Por vencer / Vencida"). El color sigue la misma regla:
+ * verde con más de 7 días, ámbar de 0 a 7, rojo si ya venció.
+ */
+function DiasRestantes({
   alerta,
+  dias,
+  fechaLimite,
 }: {
-  alerta: "vigente" | "por_vencer" | "vencida" | null;
+  alerta: FacturaListado["alerta_vencimiento"];
+  dias: number | null;
+  fechaLimite: string | null;
 }) {
-  if (!alerta) return <span style={{ color: "#c4cad6", fontSize: 12 }}>—</span>;
+  if (alerta === "pagada") {
+    return (
+      <span className="factura-badge" style={{ background: "#eef0f3", color: "#566078" }}>
+        Pagada
+      </span>
+    );
+  }
+  if (dias === null || dias === undefined || !alerta) {
+    return <span style={{ color: "#c4cad6", fontSize: 12 }}>—</span>;
+  }
   const estilos = {
-    vigente: { bg: "#e5f0e8", color: "#2e7d5b", label: "Vigente" },
-    por_vencer: { bg: "#fdf1de", color: "#8a6d1f", label: "Por vencer" },
-    vencida: { bg: "#fbe7e7", color: "#a33b3b", label: "Vencida" },
-  };
-  const s = estilos[alerta];
+    vigente: { bg: "#e5f0e8", color: "#2e7d5b" },
+    por_vencer: { bg: "#fdf1de", color: "#8a6d1f" },
+    vencida: { bg: "#fbe7e7", color: "#a33b3b" },
+  } as const;
+  const s = estilos[alerta as keyof typeof estilos] ?? estilos.vigente;
+  let texto: string;
+  if (dias > 1) texto = `Faltan ${dias} días`;
+  else if (dias === 1) texto = "Vence mañana";
+  else if (dias === 0) texto = "Vence hoy";
+  else if (dias === -1) texto = "Venció ayer";
+  else texto = `Vencida hace ${Math.abs(dias)} días`;
   return (
-    <span className="factura-badge" style={{ background: s.bg, color: s.color }}>
-      {s.label}
+    <span
+      className="factura-badge"
+      style={{ background: s.bg, color: s.color }}
+      title={fechaLimite ? `Fecha límite de pago: ${fechaLimite}` : undefined}
+    >
+      {texto}
     </span>
   );
 }
@@ -284,9 +313,9 @@ export function Facturas() {
               <p className="facturas-resumen-label">Facturas</p>
               <p className="facturas-resumen-valor">{resumen.total_facturas}</p>
             </div>
-            <div>
-              <p className="facturas-resumen-label">Total MXN</p>
-              <p className="facturas-resumen-valor">${formatMonto(resumen.total_mxn)}</p>
+            <div title={`Suma del importe (sin IVA). Con IVA: $${formatMonto(resumen.total_mxn)}`}>
+              <p className="facturas-resumen-label">Total facturado (importe) MXN</p>
+              <p className="facturas-resumen-valor">${formatMonto(resumen.importe_mxn)}</p>
             </div>
             <div>
               <p className="facturas-resumen-label">Con CP</p>
@@ -305,7 +334,7 @@ export function Facturas() {
           {resumen.total_historico > 0 && (
             <p className="facturas-nota-historico">
               El total incluye {resumen.total_historico} facturas del histórico migrado
-              (${formatMonto(resumen.total_mxn_historico)}).
+              (${formatMonto(resumen.importe_mxn_historico)} de importe).
             </p>
           )}
         </>
@@ -322,9 +351,10 @@ export function Facturas() {
                 <th>Folio</th>
                 <th>Cliente</th>
                 <th>Fecha</th>
+                <th>Importe</th>
                 <th>Total</th>
                 <th>Estado</th>
-                <th>Vencimiento</th>
+                <th>Días para pago</th>
               </tr>
             </thead>
             <tbody>
@@ -346,6 +376,10 @@ export function Facturas() {
                     <td>{f.cliente}</td>
                     <td className="facturas-cell-muted">{f.fecha}</td>
                     <td className="facturas-cell-mono">
+                      ${formatMonto(f.subtotal)}{" "}
+                      {f.moneda && f.moneda !== "MXN" ? f.moneda : ""}
+                    </td>
+                    <td className="facturas-cell-mono facturas-cell-muted">
                       ${formatMonto(f.total)}{" "}
                       {f.moneda && f.moneda !== "MXN" ? f.moneda : ""}
                     </td>
@@ -353,7 +387,11 @@ export function Facturas() {
                       <EstadoBadge nombre={f.estado} />
                     </td>
                     <td>
-                      <AlertaVencimiento alerta={f.alerta_vencimiento} />
+                      <DiasRestantes
+                        alerta={f.alerta_vencimiento}
+                        dias={f.dias_restantes}
+                        fechaLimite={f.fecha_limite_pago}
+                      />
                     </td>
                   </tr>
                 );
@@ -766,18 +804,16 @@ function FacturaDetalleView({
       <div className="factura-detalle-archivo">
         <label className="factura-detalle-label">Archivo</label>
         {factura.tiene_pdf ? (
-          <a
+          <ArchivoLink
             className="factura-file-card"
-            href={urlPdfFactura(factura.id_factura)}
-            target="_blank"
-            rel="noreferrer"
+            accion={() => abrirPdfFactura(factura.id_factura)}
           >
             <span className="factura-file-icon">PDF</span>
             <div>
               <p className="factura-file-name">Ver factura</p>
               <p className="factura-file-action">Abrir documento</p>
             </div>
-          </a>
+          </ArchivoLink>
         ) : (
           <p
             className="facturas-status"

@@ -1,7 +1,7 @@
 ﻿alembic==1.18.5
 annotated-doc==0.0.4
 annotated-types==0.7.0
-anyio==4.14.1
+anyio==4.14.2
 APScheduler==3.11.3
 bcrypt==5.0.0
 certifi==2026.6.17
@@ -10,7 +10,7 @@ cffi==2.1.0
 charset-normalizer==3.4.9
 click==8.4.2
 colorama==0.4.6
-cryptography==49.0.0
+cryptography==50.0.0
 dnspython==2.8.0
 ecdsa==0.19.2
 email-validator==2.3.0

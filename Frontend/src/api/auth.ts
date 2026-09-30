@@ -1,39 +1,7 @@
-import { apiFetch } from "./client";
+import { apiFetch, type UsuarioSesion } from "./client";
 
-// Mirrors Backend/app/esquemas/usuario.py
-
-export interface Usuario {
-  id_usuario: number;
-  correo: string;
-  nombre: string;
-  rol: string;
-}
-
-export interface LoginResponse {
-  access_token: string;
-  token_type: string;
-  refresh_token: string;
-  usuario: Usuario;
-}
-
-export interface RefreshResponse {
-  access_token: string;
-  token_type: string;
-}
-
-export function login(correo: string, password: string): Promise<LoginResponse> {
-  return apiFetch<LoginResponse>("/auth/login", {
-    method: "POST",
-    body: JSON.stringify({ correo, password }),
-  });
-}
-
-export function refreshAccessToken(refresh_token: string): Promise<RefreshResponse> {
-  return apiFetch<RefreshResponse>("/auth/refresh", {
-    method: "POST",
-    body: JSON.stringify({ refresh_token }),
-  });
-}
+// Espejo de Backend/app/esquemas/usuario.py
+export type Usuario = UsuarioSesion;
 
 export interface RegistroData {
   nombre: string;
@@ -42,9 +10,33 @@ export interface RegistroData {
   rol: string;
 }
 
+/** Solo administrador/desarrollador (el backend lo exige). */
 export function registro(data: RegistroData): Promise<Usuario> {
   return apiFetch<Usuario>("/auth/registro", {
     method: "POST",
     body: JSON.stringify(data),
   });
+}
+
+export function cambiarPassword(actual: string, nueva: string): Promise<void> {
+  return apiFetch<void>("/auth/cambiar-password", {
+    method: "POST",
+    body: JSON.stringify({ actual, nueva }),
+  });
+}
+
+/** Enlace de Google para (re)conectar el buzón de Gmail. Solo administradores. */
+export function enlaceGmail(): Promise<{ url: string; vigencia_horas: number }> {
+  return apiFetch("/auth/gmail/enlace", { method: "POST" });
+}
+
+/** Reglas de contraseña del backend (app/core/seguridad.py::validar_password). */
+export function problemaPassword(password: string, correo = ""): string | null {
+  if (password.length < 12) return "Mínimo 12 caracteres.";
+  if (new TextEncoder().encode(password).length > 72) return "Máximo 72 bytes.";
+  const clases = [/[a-z]/, /[A-Z]/, /\d/, /[^A-Za-z0-9]/].filter((r) => r.test(password)).length;
+  if (clases < 3) return "Usa al menos tres de: minúsculas, mayúsculas, números y símbolos.";
+  const usuario = correo.split("@")[0]?.toLowerCase();
+  if (usuario && password.toLowerCase().includes(usuario)) return "No debe contener el correo.";
+  return null;
 }

@@ -1,7 +1,11 @@
 from app.modelos.configuracion import Configuracion_sistema
 from app.services.gmail_service import (
     obtener_servicio_gmail, obtener_ultimo_mensaje, extraer_adjuntos,
-    obtener_mensajes_nuevos, es_error_permanente,
+    extraer_correo, obtener_mensajes_nuevos, es_error_permanente,
+)
+from app.services.detector_oc import (
+    detectar_numero_oc, es_documento_oc, clave_oc, nucleo_numerico,
+    cuerpo_es_orden_de_compra, extraer_numero_oc as _extraer_numero_oc_nuevo,
 )
 from app.services.usuario_service import obtener_usuario_sistema, obtener_estado_pendiente
 from google.auth.exceptions import RefreshError
@@ -268,6 +272,28 @@ def extraer_texto_pdf(contenido_bytes):
     return texto_completo
 
 
+def extraer_texto_y_palabras_pdf(contenido_bytes) -> tuple[str, list[dict]]:
+    """
+    Texto de todas las páginas + palabras con coordenadas de la PRIMERA.
+
+    Las coordenadas son las que permiten leer encabezados en tabla (Hyson:
+    la etiqueta "Purchase Order" arriba y el número abajo). Solo la primera
+    página: ahí está el encabezado, y extract_words cuesta.
+    """
+    with pdfplumber.open(io.BytesIO(contenido_bytes)) as pdf:
+        texto = "".join((p.extract_text() or "") for p in pdf.pages)
+        palabras = []
+        if pdf.pages:
+            try:
+                palabras = [
+                    {k: w[k] for k in ("text", "x0", "x1", "top", "bottom")}
+                    for w in pdf.pages[0].extract_words()
+                ]
+            except Exception:
+                palabras = []
+    return texto, palabras
+
+
 PATRONES_OC_ENCABEZADO = [
     r'orden de compra',
     r'purchase order',
@@ -302,33 +328,14 @@ def clasificar_pdf(contenido_bytes, uuid_factura):
 
 
 def extraer_numero_oc(texto):
-    if not texto:
-        return None
+    """
+    Número de OC en texto libre (descripción de concepto del CFDI).
 
-    patrones_con_keyword = [
-        r'\bPO#[_:\s]*([A-Z0-9]+)',
-        r'\bP\.O\.[#:\s]*([A-Z0-9]+)',
-        r'\bPO[:\s#\.]+([A-Z0-9]+)',
-        r'\bPO NUMBER[:\s#]*([A-Z0-9]+)',
-        r'\bPO N[Oo][:\s#]*([A-Z0-9]+)',
-        r'\bOC[:\s#\.]+([A-Z0-9]+)',
-        r'\bPurchase Order[:\s#]*([A-Z0-9]+)',
-        r'\bOrden de [Cc]ompra[:\s#]*([A-Z0-9]+)',
-        r'\bN[uú]mero Orden de Compra[:\s#]*([A-Z0-9]+)',
-        r'\bN[uú]mero de OC[:\s#]*([A-Z0-9]+)',
-    ]
-    for patron in patrones_con_keyword:
-        resultado = re.search(patron, texto, re.IGNORECASE)
-        if resultado:
-            valor = resultado.group(1).strip()
-            if any(c.isdigit() for c in valor):
-                return valor
-
-    candidatos = re.findall(r'\b[A-Z]{0,3}\d{4,}\b', texto.upper())
-    if candidatos:
-        return candidatos[0]
-
-    return None
+    Delegado a app.services.detector_oc. Ya NO adivina con el primer número
+    de 4 dígitos: sin etiqueta ("Orden de compra:", "PO:", "#") devuelve
+    None y la factura queda en "Requiere captura manual".
+    """
+    return _extraer_numero_oc_nuevo(texto)
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -442,13 +449,22 @@ def clasificar_adjuntos(adjuntos: dict) -> dict:
 # PDF × factura). 'asignado' evita que dos facturas reclamen el mismo archivo.
 # ═══════════════════════════════════════════════════════════════════════════
 
-def indexar_pdfs(pdfs: dict) -> list[dict]:
+def indexar_pdfs(pdfs: dict, asunto: str | None = None,
+                 hay_xml: bool = False) -> list[dict]:
+    """
+    'es_oc' lo decide detector_oc.es_documento_oc(): encabezado del PDF,
+    y para PDFs escaneados (sin texto) el nombre del archivo o el asunto.
+
+    El asunto NO se usa si el correo trae XML de factura/CP: un correo
+    "Factura OC 12345" con el PDF de la factura escaneado haría que ese PDF
+    se tomara por OC y la factura se quedara sin su PDF.
+    """
     indice = []
     for nombre, contenido in pdfs.items():
         try:
-            texto = extraer_texto_pdf(contenido)
+            texto, palabras = extraer_texto_y_palabras_pdf(contenido)
         except Exception:
-            texto = ""
+            texto, palabras = "", []
 
         encabezado = texto[:300].lower()
 
@@ -456,10 +472,11 @@ def indexar_pdfs(pdfs: dict) -> list[dict]:
             "nombre": nombre,
             "contenido": contenido,
             "texto": texto,
+            "palabras": palabras,
             # UUID sin guiones ni espacios: pdfplumber parte el UUID en líneas
             "texto_plano": texto.lower().replace("-", "").replace(" ", "").replace("\n", ""),
             "encabezado": encabezado,
-            "es_oc": any(re.search(p, encabezado) for p in PATRONES_OC_ENCABEZADO),
+            "es_oc": es_documento_oc(texto, nombre, None if hay_xml else asunto),
             "asignado": False,
         })
     return indice
@@ -504,11 +521,15 @@ def buscar_pdf_oc(indice: list[dict], numero_oc: str | None):
     if not numero_oc:
         return None
 
-    objetivo = numero_oc.upper()
+    objetivo = clave_oc(numero_oc)
+    if not objetivo:
+        return None
     for item in indice:
         if item["asignado"] or not item["es_oc"]:
             continue
-        if objetivo in item["texto"].upper():
+        texto_llave = re.sub(r"[^A-Z0-9]", "", item["texto"].upper())
+        nombre_llave = re.sub(r"[^A-Z0-9]", "", item["nombre"].upper())
+        if objetivo in texto_llave or objetivo in nombre_llave:
             item["asignado"] = True
             return item["contenido"]
 
@@ -711,10 +732,16 @@ def procesar_complemento_pago(xml_bytes, mensaje_id, db, indice_pdfs) -> bool:
     return True
 
 
-def procesar_orden_compra_suelta(item_indice, asunto, mensaje_id, db) -> bool:
+def procesar_orden_compra_suelta(item_indice, asunto, mensaje_id, db,
+                                 cuerpo: str | None = None) -> bool:
     """
     Guarda un PDF de OC que ninguna factura reclamó.
     Recibe un item del índice: el texto ya está extraído, no se relee el PDF.
+
+    El número lo decide detector_oc cruzando PDF (texto y columnas), asunto,
+    nombre del archivo y cuerpo del correo. Si ninguna fuente es confiable
+    queda vacío: la pantalla de OCs lo marca para captura, en vez de guardar
+    un "2026" que parece dato real.
     """
     pdf_bytes = item_indice["contenido"]
     nombre_pdf = item_indice["nombre"]
@@ -727,15 +754,23 @@ def procesar_orden_compra_suelta(item_indice, asunto, mensaje_id, db) -> bool:
         item_indice["asignado"] = True
         return False
 
-    numero_detectado = extraer_numero_oc(asunto)
-    if not numero_detectado:
-        numero_detectado = extraer_numero_oc(nombre_pdf)
-    if not numero_detectado:
-        numero_detectado = extraer_numero_oc(item_indice["texto"][:600])
+    resultado = detectar_numero_oc(
+        texto_pdf=item_indice.get("texto"),
+        palabras_pdf=item_indice.get("palabras"),
+        asunto=asunto,
+        nombre_archivo=nombre_pdf,
+        cuerpo=cuerpo,
+    )
+    numero_detectado = resultado.numero
+    logger.info(
+        "OC %s: numero=%r confianza=%s fuentes=%s",
+        nombre_pdf, numero_detectado, resultado.confianza, resultado.fuentes,
+    )
 
     nueva_oc = OrdenesCompra(
         numero_oc=numero_detectado,
         numero_oc_detectado=numero_detectado,
+        confianza_oc=resultado.confianza,
         archivo=pdf_bytes,
         nombre_archivo=nombre_pdf,
         hash_archivo=hash_archivo,
@@ -747,11 +782,87 @@ def procesar_orden_compra_suelta(item_indice, asunto, mensaje_id, db) -> bool:
     return True
 
 
+def _pdf_desde_cuerpo(asunto: str, remitente: str, cuerpo: str, numero: str) -> bytes:
+    """
+    Evidencia en PDF de una OC que llegó en el cuerpo del correo.
+
+    El resto del sistema (descarga, reporte, vínculo con la factura) trabaja
+    con un archivo; así esta OC se comporta igual que las que llegan
+    adjuntas y el usuario puede descargarla como cualquier otra.
+    """
+    from xml.sax.saxutils import escape
+    from reportlab.lib.pagesizes import letter
+    from reportlab.lib.styles import getSampleStyleSheet
+    from reportlab.platypus import Paragraph, SimpleDocTemplate, Spacer
+
+    estilos = getSampleStyleSheet()
+    buf = io.BytesIO()
+    doc = SimpleDocTemplate(buf, pagesize=letter, title=f"OC {numero}",
+                            leftMargin=40, rightMargin=40, topMargin=40, bottomMargin=40)
+    partes = [
+        Paragraph(f"Orden de compra {escape(numero)}", estilos["Title"]),
+        Paragraph("Recibida en el cuerpo del correo (sin archivo adjunto).", estilos["Italic"]),
+        Spacer(1, 8),
+        Paragraph(f"<b>Asunto:</b> {escape(asunto or '')}", estilos["Normal"]),
+        Paragraph(f"<b>De:</b> {escape(remitente or '')}", estilos["Normal"]),
+        Paragraph(f"<b>Guardada:</b> {datetime.now():%Y-%m-%d %H:%M}", estilos["Normal"]),
+        Spacer(1, 12),
+    ]
+    for renglon in (cuerpo or "").splitlines():
+        renglon = renglon.strip()
+        if renglon:
+            partes.append(Paragraph(escape(renglon), estilos["BodyText"]))
+    doc.build(partes)
+    return buf.getvalue()
+
+
+def procesar_oc_en_cuerpo(asunto: str, cuerpo: str, remitente: str,
+                          mensaje_id: str, db) -> bool:
+    """
+    OC que viene en el CUERPO del correo, sin PDF (SciQuest/Jaggaer de
+    Regal Rexnord, Coupa, Ariba). True si guardó una OC nueva.
+
+    Solo actúa si detector_oc.cuerpo_es_orden_de_compra() lo confirma
+    (estructura de OC + menciona a Monsort + número confiable + no es una
+    respuesta "RE:"). Si ya existe una OC con el mismo número no la duplica:
+    estas plataformas reenvían la misma orden como recordatorio.
+    """
+    resultado = cuerpo_es_orden_de_compra(asunto, cuerpo)
+    if not resultado:
+        return False
+
+    llave = clave_oc(resultado.numero)
+    for (numero,) in db.query(OrdenesCompra.numero_oc).filter(
+        OrdenesCompra.numero_oc.isnot(None)
+    ).all():
+        if clave_oc(numero) == llave:
+            logger.info("OC %s del cuerpo ya existe; no se duplica", resultado.numero)
+            return False
+
+    pdf = _pdf_desde_cuerpo(asunto, remitente, cuerpo, resultado.numero)
+    nueva_oc = OrdenesCompra(
+        numero_oc=resultado.numero,
+        numero_oc_detectado=resultado.numero,
+        confianza_oc=resultado.confianza,
+        archivo=pdf,
+        nombre_archivo=f"OC_{re.sub(r'[^A-Za-z0-9_-]', '_', resultado.numero)}_correo.pdf",
+        hash_archivo=hashlib.sha256(
+            f"cuerpo:{mensaje_id}:{llave}".encode()
+        ).hexdigest(),
+        message_id=mensaje_id,
+    )
+    db.add(nueva_oc)
+    db.flush()
+    logger.info("OC %s guardada desde el cuerpo del correo %s", resultado.numero, mensaje_id)
+    return True
+
+
 # ═══════════════════════════════════════════════════════════════════════════
 # DISPATCHER DE CORREO
 # ═══════════════════════════════════════════════════════════════════════════
 
-def procesar_correo(adjuntos, asunto, mensaje_id, db, usuario_sistema) -> dict:
+def procesar_correo(adjuntos, asunto, mensaje_id, db, usuario_sistema,
+                    cuerpo: str | None = None, remitente: str | None = None) -> dict:
     """
     Procesa TODOS los documentos de un correo, sin importar cuántos sean
     ni si vienen mezclados.
@@ -770,7 +881,10 @@ def procesar_correo(adjuntos, asunto, mensaje_id, db, usuario_sistema) -> dict:
     Devuelve {'facturas': n, 'complementos': n, 'ordenes': n, 'errores': n}
     """
     clasificados = clasificar_adjuntos(adjuntos)
-    indice_pdfs = indexar_pdfs(clasificados["pdfs"])
+    indice_pdfs = indexar_pdfs(
+        clasificados["pdfs"], asunto=asunto,
+        hay_xml=bool(clasificados["facturas"] or clasificados["complementos"]),
+    )
 
     resumen = {"facturas": 0, "complementos": 0, "ordenes": 0, "errores": 0}
 
@@ -809,7 +923,7 @@ def procesar_correo(adjuntos, asunto, mensaje_id, db, usuario_sistema) -> dict:
         if _aislado(
             f"orden de compra {item['nombre']}",
             lambda it=item: procesar_orden_compra_suelta(
-                it, asunto, mensaje_id, db
+                it, asunto, mensaje_id, db, cuerpo
             ),
         ):
             resumen["ordenes"] += 1
@@ -825,7 +939,7 @@ def procesar_correo(adjuntos, asunto, mensaje_id, db, usuario_sistema) -> dict:
             if _aislado(
                 f"orden de compra suelta {item['nombre']}",
                 lambda it=item: procesar_orden_compra_suelta(
-                    it, asunto, mensaje_id, db
+                    it, asunto, mensaje_id, db, cuerpo
                 ),
             ):
                 resumen["ordenes"] += 1
@@ -844,6 +958,16 @@ def procesar_correo(adjuntos, asunto, mensaje_id, db, usuario_sistema) -> dict:
                 len(sin_clasificar),
                 [i["nombre"] for i in sin_clasificar],
             )
+
+        # OC en el cuerpo del correo (sin adjunto de OC). Solo si el correo
+        # no produjo ningún documento: un correo con factura que además dice
+        # "Orden de compra: X" en el texto NO es una OC nueva.
+        if cuerpo and not (resumen["facturas"] or resumen["complementos"] or resumen["ordenes"]):
+            if _aislado(
+                "orden de compra en el cuerpo",
+                lambda: procesar_oc_en_cuerpo(asunto, cuerpo, remitente or "", mensaje_id, db),
+            ):
+                resumen["ordenes"] += 1
 
     return resumen
 
@@ -945,13 +1069,36 @@ def reconciliar(db):
         Facturas.id_estado.notin_(ids_terminales)
     ).all()
 
-    for factura in facturas_sin_oc:
-        ocs = db.query(OrdenesCompra).filter(
-            OrdenesCompra.numero_oc == factura.numero_oc
-        ).all()
+    # Comparación por LLAVE normalizada (detector_oc.clave_oc), no por texto
+    # exacto: "BOS-507-91753." en la factura y "BOS-507-91753" en la OC, o
+    # "#PO-VSM-12062" y "PO-VSM-12062", son la misma orden. Si la llave no
+    # encuentra nada, se intenta por el núcleo numérico ("C-10003766965" vs
+    # "10003766965"), pero solo si hay UNA candidata del mismo cliente:
+    # ante ambigüedad no se vincula.
+    if facturas_sin_oc:
+        por_llave: dict[str, list] = {}
+        por_nucleo: dict[str, list] = {}
+        for oc in db.query(
+            OrdenesCompra.id, OrdenesCompra.numero_oc, OrdenesCompra.id_cliente
+        ).filter(OrdenesCompra.numero_oc.isnot(None)).all():
+            k = clave_oc(oc.numero_oc)
+            if k:
+                por_llave.setdefault(k, []).append(oc)
+            n = nucleo_numerico(oc.numero_oc)
+            if n and len(n) >= 5:
+                por_nucleo.setdefault(n, []).append(oc)
 
-        if len(ocs) == 1:
-            factura.id_orden_compra = ocs[0].id
+        for factura in facturas_sin_oc:
+            candidatas = por_llave.get(clave_oc(factura.numero_oc) or "", [])
+            if not candidatas:
+                n = nucleo_numerico(factura.numero_oc)
+                if n and len(n) >= 5:
+                    candidatas = [
+                        oc for oc in por_nucleo.get(n, [])
+                        if oc.id_cliente in (None, factura.id_cliente)
+                    ]
+            if len(candidatas) == 1:
+                factura.id_orden_compra = candidatas[0].id
 
     db.flush()
 
@@ -1222,10 +1369,13 @@ def _procesar_un_correo(db, servicio, mensaje_id: str, usuario_sistema) -> dict:
     Commit al final: las excepciones suben al llamador, que se encarga del
     rollback y de CorreosFallidos.
     """
-    adjuntos, asunto = extraer_adjuntos(servicio, mensaje_id)
+    correo = extraer_correo(servicio, mensaje_id)
 
     # Procesa TODOS los documentos del correo, no solo el primero
-    resumen = procesar_correo(adjuntos, asunto, mensaje_id, db, usuario_sistema)
+    resumen = procesar_correo(
+        correo["adjuntos"], correo["asunto"], mensaje_id, db, usuario_sistema,
+        cuerpo=correo["cuerpo"], remitente=correo["remitente"],
+    )
 
     db.add(CorreosProcesados(
         message_id=mensaje_id,
@@ -1244,13 +1394,19 @@ def procesar_correos_nuevos(db):
         ids_mensajes, nuevo_history_id = obtener_mensajes_nuevos(db, servicio)
     except RefreshError as e:
         logger.error(
-            "Credenciales de Gmail inválidas (%s)."
-            "Reatuoriza en /auth/gmail/iniciar", e
+            "Credenciales de Gmail inválidas (%s). "
+            "Reautoriza con POST /auth/gmail/enlace", e
         )
-        return
+        from app.services.notificacion_service import registrar_error
+        registrar_error(
+            db, "Gmail desconectado: no se están leyendo correos",
+            "La autorización de Gmail venció o fue revocada. Un administrador "
+            "debe volver a conectar la cuenta.",
+        )
+        return {"procesados": 0, "fallidos": 0, "error": "gmail_desconectado"}
     except RuntimeError as e:
         logger.error("Gmail no configurado: %s", e)
-        return
+        return {"procesados": 0, "fallidos": 0, "error": "gmail_no_configurado"}
     
     ids_mensajes = list(dict.fromkeys(ids_mensajes))
     usuario_sistema = obtener_usuario_sistema(db)
@@ -1292,6 +1448,8 @@ def procesar_correos_nuevos(db):
         if id_guardado:
             id_guardado.valor = nuevo_history_id
             db.commit()
+
+    return {"procesados": procesados, "fallidos": fallidos, "error": None}
 
 
 # ---------- REPROCESO DE CORREOS FALLIDOS ----------

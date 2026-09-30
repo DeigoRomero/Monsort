@@ -6,6 +6,7 @@ import { OrdenesCompra } from "./OrdenesCompra";
 import { Clientes } from "./Clientes";
 import { Register } from "./Register";
 import { Complementos } from "./Complementos";
+import { Notificaciones } from "../Components/Notificaciones";
 import "./Dashboard.css";
 
 type Vista =
@@ -34,6 +35,17 @@ export function Dashboard() {
         </div>
 
         <div className="dashboard-sidebar-top">
+          <Notificaciones
+            onIr={(seccion) => {
+              const destino: Record<string, Vista> = {
+                facturas: "facturas-emitidas",
+                ordenes: "ordenes",
+                complementos: "complementos",
+                recibidas: "facturas-recibidas",
+              };
+              if (destino[seccion]) setVista(destino[seccion]);
+            }}
+          />
           {puedeCrearUsuarios && (
             <button
               className={`dashboard-nav-item${vista === "crear-usuario" ? " active" : ""}`}

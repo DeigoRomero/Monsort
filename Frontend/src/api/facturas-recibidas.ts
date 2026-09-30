@@ -1,4 +1,4 @@
-import { apiFetch, API_URL } from "./client";
+import { apiFetch, descargarArchivo } from "./client";
 
 export interface FacturaRecibidaListado {
   id_factura_recibida: number;
@@ -165,9 +165,7 @@ export function listarHistorialSincronizacion(
   );
 }
 
-// Pendiente de conectar: Diego va a proteger esta ruta con autenticacion
-// porque dispara la entrada al SAT con la e.firma de Monsort. Cuando avise,
-// se llama igual pero mandando el token de sesion.
+// Protegida: solo administrador/desarrollador (entra al SAT con la e.firma).
 export function iniciarSincronizacionPortal(dias = 5): Promise<unknown> {
   return apiFetch<unknown>("/facturas-recibidas/sincronizacion", {
     method: "POST",
@@ -175,28 +173,16 @@ export function iniciarSincronizacionPortal(dias = 5): Promise<unknown> {
   });
 }
 
-export function urlXmlRecibida(id: number): string {
-  return `${API_URL}/facturas-recibidas/${id}/xml`;
-}
-
-async function descargarPdf(url: string, nombreArchivo: string) {
-  const response = await fetch(url, {
-    headers: { "ngrok-skip-browser-warning": "true" },
-  });
-  if (!response.ok) throw new Error("No se pudo generar el reporte.");
-  const blob = await response.blob();
-  const objectUrl = URL.createObjectURL(blob);
-  const a = document.createElement("a");
-  a.href = objectUrl;
-  a.download = nombreArchivo;
-  a.click();
-  URL.revokeObjectURL(objectUrl);
+export function descargarXmlRecibida(id: number) {
+  return descargarArchivo(`/facturas-recibidas/${id}/xml`, `recibida_${id}.xml`);
 }
 
 export function descargarReporteRecibidas(filtros: FiltrosRecibidas = {}) {
   const { pagina, por_pagina, ...resto } = filtros;
-  return descargarPdf(
-    `${API_URL}/reportes/recibidas${buildQuery(resto)}`,
+  void pagina;
+  void por_pagina;
+  return descargarArchivo(
+    `/reportes/recibidas${buildQuery(resto)}`,
     "reporte_facturas_recibidas.pdf"
   );
 }

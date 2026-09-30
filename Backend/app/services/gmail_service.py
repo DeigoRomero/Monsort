@@ -233,31 +233,99 @@ def _recorrer_partes(servicio, message_id, partes, adjuntos):
         time.sleep(PAUSA_ENTRE_ADJUNTOS)
 
 
-def extraer_adjuntos(servicio, message_id):
-    """Devuelve ({nombre: bytes}, asunto). Recorre todo el arbol MIME."""
+def _decodificar_cuerpo(datos_b64: str) -> str:
+    crudo = base64.urlsafe_b64decode(datos_b64 + "=" * (-len(datos_b64) % 4))
+    for codificacion in ("utf-8", "latin-1"):
+        try:
+            return crudo.decode(codificacion)
+        except UnicodeDecodeError:
+            continue
+    return crudo.decode("utf-8", "replace")
+
+
+def _recorrer_cuerpo(servicio, message_id, parte, textos: dict) -> None:
+    """
+    Junta el cuerpo del correo (text/plain y text/html, sin adjuntos).
+
+    Hace falta para las OCs que llegan SIN adjunto: SciQuest/Jaggaer (Regal
+    Rexnord), Coupa y Ariba mandan la orden completa en el HTML del correo,
+    y antes esos correos se marcaban como 'desconocido' sin mirar adentro.
+    """
+    if not parte:
+        return
+    for sub in parte.get("parts") or []:
+        _recorrer_cuerpo(servicio, message_id, sub, textos)
+
+    mime = (parte.get("mimeType") or "").lower()
+    if mime not in ("text/plain", "text/html") or parte.get("filename"):
+        return
+    cuerpo = parte.get("body", {}) or {}
+    datos = cuerpo.get("data")
+    if not datos and cuerpo.get("attachmentId"):
+        # Cuerpos grandes: Gmail los manda como "adjunto" aparte
+        try:
+            crudo = _descargar_adjunto(servicio, message_id, cuerpo["attachmentId"], "cuerpo")
+            datos = base64.urlsafe_b64encode(crudo).decode()
+        except Exception:
+            logger.warning("No se pudo bajar el cuerpo de %s", message_id)
+            return
+    if datos:
+        textos.setdefault(mime, []).append(_decodificar_cuerpo(datos))
+
+
+def extraer_correo(servicio, message_id) -> dict:
+    """
+    Todo lo que el pipeline necesita de un correo, con UNA lectura:
+
+        {"adjuntos": {nombre: bytes}, "asunto": str, "cuerpo": str, "remitente": str}
+
+    'cuerpo' ya viene como texto plano (el HTML se convierte).
+    """
+    from app.services.detector_oc import html_a_texto   # import local: evita ciclo
+
     # ESTA es la llamada que tiraba ~1,700 correos entre el 11 y el 26 de
     # septiembre de 2026: los adjuntos tenian backoff y este get no, asi que
-    # un 403 por cuota bastaba para dar el correo por perdido. Blindar la
-    # bodega y dejar el porton abierto.
+    # un 403 por cuota bastaba para dar el correo por perdido.
     mensaje = _con_reintentos(
         lambda: servicio.users().messages().get(
             userId='me', id=message_id, format='full'
         ).execute(),
         f"leer mensaje {message_id}",
     )
-
     payload = mensaje.get('payload', {})
-
     headers = payload.get('headers', [])
-    asunto = next(
-        (h['value'] for h in headers if h.get('name', '').lower() == 'subject'),
-        ''
-    )
+
+    def _header(nombre):
+        return next(
+            (h['value'] for h in headers if h.get('name', '').lower() == nombre), ''
+        )
 
     adjuntos: dict[str, bytes] = {}
     _recorrer_partes(servicio, message_id, payload.get('parts'), adjuntos)
 
-    return adjuntos, asunto
+    textos: dict[str, list[str]] = {}
+    _recorrer_cuerpo(servicio, message_id, payload, textos)
+    if textos.get("text/html"):
+        # El HTML conserva la tabla de la OC mejor que el text/plain que
+        # generan estas plataformas (a veces viene vacio).
+        cuerpo = html_a_texto("\n".join(textos["text/html"]))
+    else:
+        cuerpo = "\n".join(textos.get("text/plain", []))
+
+    return {
+        "adjuntos": adjuntos,
+        "asunto": _header('subject'),
+        "cuerpo": cuerpo[:100_000],
+        "remitente": _header('from'),
+    }
+
+
+def extraer_adjuntos(servicio, message_id):
+    """
+    Compatibilidad: ({nombre: bytes}, asunto). El pipeline usa extraer_correo.
+    """
+    correo = extraer_correo(servicio, message_id)
+    return correo["adjuntos"], correo["asunto"]
 
 
 def obtener_ultimo_mensaje(servicio):

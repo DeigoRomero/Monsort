@@ -34,7 +34,10 @@ class FacturaListado(BaseModel):
     tiene_oc: bool
     tiene_cp: bool
     fecha_limite_pago: date | None = None
-    alerta_vencimiento: str | None = None  # "vigente" | "por_vencer" | "vencida"
+    alerta_vencimiento: str | None = None  # "vigente" | "por_vencer" | "vencida" | "pagada"
+    # Días hasta fecha_limite_pago (negativo = vencida hace N días). None si
+    # no hay fecha de validación/plazo, o si la factura ya está pagada.
+    dias_restantes: int | None = None
 
 
 class ConceptoDetalle(BaseModel):
@@ -154,7 +157,11 @@ class ResumenFacturas(BaseModel):
     Se devuelve junto con el listado en un único response.
     """
     total_facturas: int
-    total_mxn: Decimal                  # suma de totales convertidos a MXN
+    # "Total facturado": suma del IMPORTE (subtotal del CFDI, sin IVA)
+    # convertido a MXN. Así lo cuadra la contabilidad del cliente (30/09/2026).
+    importe_mxn: Decimal = Decimal("0")
+    importe_mxn_historico: Decimal = Decimal("0")
+    total_mxn: Decimal                  # suma de totales (con IVA) en MXN; referencia
     total_con_cp: int                   # facturas que tienen CP vinculado
     total_sin_cp: int
     total_canceladas: int               # solo si incluir_canceladas=True, sino 0

@@ -150,7 +150,13 @@ texto = texto_pdf(pdf)
 afirmar("Importe" in texto, "la columna se llama Importe, no Subtotal")
 afirmar("Subtotal" not in texto, "y ya no aparece la palabra Subtotal")
 afirmar("IVA" in texto and "Total" in texto, "IVA y Total presentes")
-afirmar("TotalMXN" in plano(texto), "y Total MXN para la conversion")
+afirmar("ImporteMXN" in plano(texto), "e Importe MXN para la conversion")
+# 30/09/2026: el total facturado se suma sobre el IMPORTE (sin IVA). Las
+# cuatro facturas valen 1,000 de importe y 1,080 de total cada una.
+afirmar("Totalfacturado(importe,sinIVA):$4,000.00MXN" in plano(texto),
+        "el total facturado es la suma de importes (4 x 1,000), no de totales")
+afirmar("TotalconIVA:$4,320.00MXN" in plano(texto),
+        "y el total con IVA queda solo como referencia")
 
 encabezados = ["Importe", "IVA", "Total"]
 posiciones = [plano(texto).index(e) for e in encabezados]

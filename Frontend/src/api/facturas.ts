@@ -1,4 +1,4 @@
-import { apiFetch, API_URL } from "./client";
+import { apiFetch, descargarArchivo } from "./client";
 
 export interface FacturaListado {
   id_factura: number;
@@ -18,12 +18,20 @@ export interface FacturaListado {
   tiene_xml: boolean;
   tiene_oc: boolean;
   tiene_cp: boolean;
+  subtotal: number | string | null;
+  iva: number | string | null;
   fecha_limite_pago: string | null;
-  alerta_vencimiento: "vigente" | "por_vencer" | "vencida" | null;
+  alerta_vencimiento: "vigente" | "por_vencer" | "vencida" | "pagada" | null;
+  /** Días hasta la fecha límite de pago; negativo = vencida hace N días. */
+  dias_restantes: number | null;
 }
 
 export interface ResumenFacturas {
   total_facturas: number;
+  /** Total facturado: suma del IMPORTE (subtotal, sin IVA) en MXN. */
+  importe_mxn: number;
+  importe_mxn_historico: number;
+  /** Suma de totales con IVA en MXN (referencia). */
   total_mxn: number;
   total_con_cp: number;
   total_sin_cp: number;
@@ -78,6 +86,7 @@ export interface OrdenCompraCandidata {
   fecha_recepcion: string;
   tiene_archivo: boolean;
   facturas_asociadas: number;
+  confianza_oc?: string | null;
 }
 
 export interface ComplementoResumen {
@@ -203,37 +212,25 @@ export function cancelarCP(idCp: number, motivo?: string): Promise<void> {
   });
 }
 
-export function urlPdfFactura(idFactura: number): string {
-  return `${API_URL}/facturas/${idFactura}/pdf`;
+export function abrirPdfFactura(idFactura: number) {
+  return descargarArchivo(`/facturas/${idFactura}/pdf`, `factura_${idFactura}.pdf`, "abrir");
 }
 
-async function descargarPdf(url: string, nombreArchivo: string) {
-  const response = await fetch(url, {
-    headers: { "ngrok-skip-browser-warning": "true" },
-  });
-  if (!response.ok) throw new Error("No se pudo generar el reporte.");
-  const blob = await response.blob();
-  const objectUrl = URL.createObjectURL(blob);
-  const a = document.createElement("a");
-  a.href = objectUrl;
-  a.download = nombreArchivo;
-  a.click();
-  URL.revokeObjectURL(objectUrl);
+export function descargarXmlFactura(idFactura: number) {
+  return descargarArchivo(`/facturas/${idFactura}/xml`, `factura_${idFactura}.xml`);
 }
 
 export function descargarReporteGeneral(filtros: FiltrosFacturas = {}) {
-  return descargarPdf(
-    `${API_URL}/reportes/general${buildQuery(filtros)}`,
-    "reporte_general.pdf"
-  );
+  const { pagina, por_pagina, ...resto } = filtros;
+  void pagina;
+  void por_pagina;
+  return descargarArchivo(`/reportes/general${buildQuery(resto)}`, "reporte_general.pdf");
 }
 
 export function descargarReporteDetalle(idFactura: number) {
-  return descargarPdf(
-    `${API_URL}/reportes/detalle/${idFactura}`,
-    `reporte_factura_${idFactura}.pdf`
-  );
+  return descargarArchivo(`/reportes/detalle/${idFactura}`, `reporte_factura_${idFactura}.pdf`);
 }
+
 export interface VerificacionSat {
   id_factura: number;
   folio_fiscal: string;

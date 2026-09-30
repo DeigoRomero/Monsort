@@ -18,6 +18,9 @@ from math import ceil
 from decimal import Decimal
 
 from app.BaseDeDatos import get_db
+from app.core.dependencias import ROLES_ADMIN, requiere_roles
+from app.core.descargas import respuesta_archivo
+from app.modelos.usuario import Usuarios
 from app.core.config import settings
 from app.modelos.complemento_pago import ComplementosPago
 from app.modelos.cp_documento_relacionado import CPDocumentosRelacionados
@@ -678,6 +681,7 @@ def listar_correos_fallidos(
 def reprocesar_correos(
     limite: int = Query(25, ge=1, le=200),
     db: Session = Depends(get_db),
+    _admin: Usuarios = Depends(requiere_roles(*ROLES_ADMIN)),
 ):
     """
     Reintenta los correos caídos, del más viejo al más nuevo.
@@ -782,11 +786,7 @@ def descargar_pdf_cp(id_cp: int, db: Session = Depends(get_db)):
         raise HTTPException(status_code=404, detail="PDF no disponible")
 
     nombre = fila.folio or fila.uuid_cp or str(id_cp)
-    return Response(
-        content=fila.archivo_pdf,
-        media_type="application/pdf",
-        headers={"Content-Disposition": f'inline; filename="{nombre}.pdf"'},
-    )
+    return respuesta_archivo(fila.archivo_pdf, nombre, respaldo=f"CP_{id_cp}")
 
 
 @router.get("/{id_cp}/xml", tags=["Complementos de pago"])
@@ -801,8 +801,5 @@ def descargar_xml_cp(id_cp: int, db: Session = Depends(get_db)):
         raise HTTPException(status_code=404, detail="XML no disponible")
 
     nombre = fila.folio or fila.uuid_cp or str(id_cp)
-    return Response(
-        content=fila.archivo_xml,
-        media_type="application/xml",
-        headers={"Content-Disposition": f'attachment; filename="{nombre}.xml"'},
-    )
+    return respuesta_archivo(fila.archivo_xml, nombre, respaldo=f"CP_{id_cp}",
+                             media_type="application/xml", extension=".xml", inline=False)

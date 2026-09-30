@@ -1,98 +1,140 @@
-from datetime import datetime, timezone
-from app.modelos.usuario import Usuarios # Importar el modelo de usuario
-from app.core.seguridad import verify_password, hash_password # Importar la función de verificación de contraseña y la función para crear el token de refresco
-from sqlalchemy.orm import Session # Importar la clase Session de SQLAlchemy
+"""
+Autenticación: login con bloqueo, refresh con rotación, registro con política
+de contraseñas. Las rutas viven en app/api/rutas/auth.py.
+"""
+import logging
+from datetime import datetime, timedelta
 
-def autenticar_usuario(correo: str, password: str, db: Session) -> Usuarios | None:
-    """
-    Función para autenticar un usuario.
-    
-    Args:
-        correo (str): Correo electrónico del usuario.
-        password (str): Contraseña proporcionada por el usuario.
-        db (Session): Sesión de la base de datos.
+from sqlalchemy import func
+from sqlalchemy.orm import Session
 
-    Returns:
-        Usuarios | None: Retorna el objeto de usuario si la autenticación es exitosa,
-    """
-    # Buscar el usuario en la base de datos por correo electrónico
-    usuario = db.query(Usuarios).filter(Usuarios.correo == correo).first()
-    
-    # Verificar si el usuario existe y si la contraseña es correcta
-    if usuario and verify_password(password, usuario.password_hash):
-        return usuario  # Retornar el objeto de usuario si la autenticación es exitosa
-    
-    return None  # Retornar None si la autenticación falla
+from app.core.seguridad import (
+    MAX_FALLOS_CUENTA, MINUTOS_BLOQUEO_CUENTA, comparar_con_señuelo,
+    crear_refresh_token, hash_password, huella_token, validar_password,
+    verify_password,
+)
+from app.modelos.usuario import Usuarios
 
-def guardar_refresh_token(usuario: Usuarios, token: str, expiracion: datetime, db: Session) -> None:
+logger = logging.getLogger("app.seguridad")
+
+
+def _normalizar_correo(correo: str) -> str:
+    return (correo or "").strip().lower()
+
+
+def buscar_por_correo(db: Session, correo: str) -> Usuarios | None:
+    return db.query(Usuarios).filter(
+        func.lower(Usuarios.correo) == _normalizar_correo(correo)
+    ).first()
+
+
+def autenticar_usuario(correo: str, password: str, db: Session,
+                       ip: str = "") -> Usuarios | None:
     """
-    Función para guardar el token de refresco y su fecha de expiración en la base de datos.
-    
-    Args:
-        usuario (Usuarios): Objeto del usuario al que se le asignará el token de refresco.
-        token (str): Token de refresco generado.
-        expiracion (datetime): Fecha y hora de expiración del token.
-        db (Session): Sesión de la base de datos.
+    El usuario si la contraseña es correcta; None en cualquier otro caso.
+
+    No distingue "no existe", "contraseña mal", "bloqueada" o "desactivada"
+    hacia afuera: dar pistas le ahorra trabajo a quien prueba correos.
+    La razón real queda en el log.
     """
-    # Asignar el token de refresco y su fecha de expiración al usuario
-    usuario.refresh_token = token
+    usuario = buscar_por_correo(db, correo)
+    if not usuario:
+        comparar_con_señuelo(password)   # mismo tiempo de respuesta
+        logger.warning("Login fallido: correo no registrado (%s) desde %s", correo, ip)
+        return None
+
+    ahora = datetime.now()
+    if usuario.bloqueado_hasta and usuario.bloqueado_hasta > ahora:
+        comparar_con_señuelo(password)
+        logger.warning("Login rechazado: cuenta %s bloqueada hasta %s (IP %s)",
+                       usuario.correo, usuario.bloqueado_hasta, ip)
+        return None
+
+    if not usuario.activo:
+        comparar_con_señuelo(password)
+        logger.warning("Login rechazado: cuenta desactivada %s (IP %s)", usuario.correo, ip)
+        return None
+
+    if not verify_password(password, usuario.password_hash):
+        usuario.intentos_fallidos = (usuario.intentos_fallidos or 0) + 1
+        if usuario.intentos_fallidos >= MAX_FALLOS_CUENTA:
+            usuario.bloqueado_hasta = ahora + timedelta(minutes=MINUTOS_BLOQUEO_CUENTA)
+            usuario.intentos_fallidos = 0
+            logger.warning("Cuenta %s bloqueada %d min tras %d intentos (IP %s)",
+                           usuario.correo, MINUTOS_BLOQUEO_CUENTA, MAX_FALLOS_CUENTA, ip)
+        else:
+            logger.warning("Login fallido: contraseña incorrecta para %s (%d/%d) desde %s",
+                           usuario.correo, usuario.intentos_fallidos, MAX_FALLOS_CUENTA, ip)
+        db.commit()
+        return None
+
+    usuario.intentos_fallidos = 0
+    usuario.bloqueado_hasta = None
+    usuario.ultimo_acceso = ahora
+    db.commit()
+    logger.info("Login correcto: %s desde %s", usuario.correo, ip)
+    return usuario
+
+
+def emitir_refresh_token(usuario: Usuarios, db: Session) -> str:
+    """Genera un refresh token nuevo, guarda su huella y devuelve el token."""
+    token, expiracion = crear_refresh_token()
+    usuario.refresh_token = huella_token(token)
     usuario.refresh_token_expiracion = expiracion
-    
+    db.commit()
+    return token
+
+
+def verificar_refresh_token(token: str | None, db: Session) -> Usuarios | None:
+    if not token or len(token) > 200:
+        return None
+    usuario = db.query(Usuarios).filter(
+        Usuarios.refresh_token == huella_token(token)
+    ).first()
+    if not usuario or not usuario.activo:
+        return None
+    if not usuario.refresh_token_expiracion or usuario.refresh_token_expiracion <= datetime.now():
+        return None
+    return usuario
+
+
+def cerrar_sesion(usuario: Usuarios, db: Session) -> None:
+    """Invalida el refresh token y TODOS los access token vivos del usuario."""
+    usuario.refresh_token = None
+    usuario.refresh_token_expiracion = None
+    usuario.sesion_version = (usuario.sesion_version or 0) + 1
     db.commit()
 
-def verificar_refresh_token(token: str, db: Session) -> Usuarios | None:
-    """
-    Función para verificar un token de refresco.
-    
-    Args:
-        token (str): Token de refresco proporcionado por el usuario.
-        db (Session): Sesión de la base de datos.
-
-    Returns:
-        Usuarios | None: Retorna el objeto de usuario si el token es válido y no ha expirado,
-    """
-    # Buscar el usuario en la base de datos por el token de refresco
-    usuario = db.query(Usuarios).filter(Usuarios.refresh_token == token).first()
-    
-    # Verificar si el usuario existe y si el token no ha expirado
-    if usuario and usuario.refresh_token_expiracion > datetime.now():
-        return usuario  # Retornar el objeto de usuario si el token es válido
-    
-    return None  # Retornar None si el token es inválido o ha expirado
 
 def registrar_usuario(nombre: str, correo: str, password: str, rol: str, db: Session) -> Usuarios:
-    """
-    Función para registrar un nuevo usuario en la base de datos.
-    
-    Args:
-        nombre (str): Nombre del usuario.
-        correo (str): Correo electrónico del usuario.
-        password (str): Contraseña del usuario.
-        rol (str): Rol del usuario.
-        db (Session): Sesión de la base de datos.
-
-    Returns:
-        Usuarios: Retorna el objeto del usuario registrado con la contraseña hasheada.
-    """
-    usuario_existente = db.query(Usuarios).filter(Usuarios.correo == correo).first()
-
-    if usuario_existente:
+    correo = _normalizar_correo(correo)
+    if buscar_por_correo(db, correo):
         raise ValueError("El correo ya está registrado.")
-    
-    # Hashear la contraseña antes de guardarla en la base de datos
-    hash = hash_password(password)
 
-    # Crear un nuevo objeto de usuario
+    problema = validar_password(password, correo)
+    if problema:
+        raise ValueError(problema)
+
     nuevo_usuario = Usuarios(
-        nombre=nombre,
+        nombre=nombre.strip(),
         correo=correo,
-        password_hash=hash,
-        rol=rol
+        password_hash=hash_password(password),
+        rol=rol,
+        activo=True,
+        intentos_fallidos=0,
+        sesion_version=0,
     )
-    
-    # Agregar el nuevo usuario a la sesión y guardar los cambios en la base de datos
     db.add(nuevo_usuario)
     db.commit()
-    db.refresh(nuevo_usuario)  # Refrescar el objeto para obtener el ID generado
-    
-    return nuevo_usuario  # Retornar el objeto del usuario registrado
+    db.refresh(nuevo_usuario)
+    return nuevo_usuario
+
+
+def cambiar_password(usuario: Usuarios, actual: str, nueva: str, db: Session) -> None:
+    if not verify_password(actual, usuario.password_hash):
+        raise ValueError("La contraseña actual no es correcta.")
+    problema = validar_password(nueva, usuario.correo)
+    if problema:
+        raise ValueError(problema)
+    usuario.password_hash = hash_password(nueva)
+    cerrar_sesion(usuario, db)   # cierra las demás sesiones abiertas

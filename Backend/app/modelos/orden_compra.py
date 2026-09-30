@@ -9,6 +9,9 @@ class OrdenesCompra(Base):
     id = Column(Integer, primary_key=True, index=True)
     numero_oc = Column(String, nullable=True)        # nullable: puede no detectarse
     numero_oc_detectado = Column(String, nullable=True)  # raw del parser, sin resolver
+    # alta | media | baja | ninguna — qué tan seguro estuvo detector_oc.
+    # 'baja'/'ninguna' se marcan en pantalla para que alguien lo revise.
+    confianza_oc = Column(String(10), nullable=True)
     
     archivo = Column(LargeBinary, nullable=True)
     nombre_archivo = Column(String, nullable=True)

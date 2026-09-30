@@ -1,15 +1,20 @@
 from fastapi import APIRouter, Depends, HTTPException, Response, Query
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, load_only
 from math import ceil
 
 from app.esquemas.orden_compra import OrdenCompraResumen, OrdenCompraActualizar, OrdenCompraListado
 from app.BaseDeDatos import get_db
+from app.core.dependencias import usuario_actual
+from app.core.descargas import respuesta_archivo
+from app.modelos.usuario import Usuarios
+from app.services.detector_oc import clave_oc, nucleo_numerico
 from app.modelos.factura import Facturas
 from app.modelos.estados import Estados
 from app.modelos.orden_compra import OrdenesCompra
 from app.modelos.complemento_pago import ComplementosPago
 from app.modelos.cp_documento_relacionado import CPDocumentosRelacionados
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
+from zoneinfo import ZoneInfo
 from app.esquemas.factura import (
     FacturaListado, FacturaDetalle, FacturaActualizar,
     ConceptoDetalle, ComplementoResumen, VincularOCRequest,
@@ -26,16 +31,21 @@ from app.services.query_builder import construir_query_facturas, calcular_resume
 
 router = APIRouter()
 
+ZONA_MEXICO = ZoneInfo("America/Mexico_City")
+
 
 # ─────────────────────────────────────────────
 # HELPERS INTERNOS
 # ─────────────────────────────────────────────
 
 def _calcular_alerta(fecha_validacion: date | None, dias_plazo: int | None):
+    """(fecha_limite, alerta, dias_restantes). Días negativos = vencida hace N días."""
     if not fecha_validacion or dias_plazo is None:
-        return None, None
+        return None, None, None
     fecha_limite = fecha_validacion + timedelta(days=dias_plazo)
-    hoy = date.today()
+    # Hoy en México: el VPS corre en UTC y de 18:00 a 23:59 date.today()
+    # ya es "mañana" (mismo bug que la ventana del SAT, 25/09/2026).
+    hoy = datetime.now(ZONA_MEXICO).date()
     dias_restantes = (fecha_limite - hoy).days
     if dias_restantes < 0:
         alerta = "vencida"
@@ -43,12 +53,15 @@ def _calcular_alerta(fecha_validacion: date | None, dias_plazo: int | None):
         alerta = "por_vencer"
     else:
         alerta = "vigente"
-    return fecha_limite, alerta
+    return fecha_limite, alerta, dias_restantes
 
 def _factura_a_listado(f: Facturas, tiene_cp: bool) -> FacturaListado:
-    fecha_limite, alerta = _calcular_alerta(
+    fecha_limite, alerta, dias_restantes = _calcular_alerta(
         f.fecha_validacion, f.dias_plazo_pago_aplicado
     )
+    # Una factura ya pagada no "vence": el contador deja de tener sentido.
+    if f.fecha_liquidacion:
+        alerta, dias_restantes = "pagada", None
     return FacturaListado(
         id_factura=f.id_factura,
         folio_fiscal=f.folio_fiscal,
@@ -71,16 +84,15 @@ def _factura_a_listado(f: Facturas, tiene_cp: bool) -> FacturaListado:
         tiene_cp=tiene_cp,
         fecha_limite_pago=fecha_limite,
         alerta_vencimiento=alerta,
+        dias_restantes=dias_restantes,
     )
 
-def _obtener_usuario_actual(db: Session) -> int:
+def _obtener_usuario_actual(usuario: Usuarios) -> int:
     """
-    Placeholder hasta que integres JWT.
-    Devuelve el id_usuario del usuario sistema.
-    Reemplaza con: token_data.id_usuario cuando tengas auth.
+    Quién hizo el cambio, para HistorialVerificacion. Antes todo quedaba a
+    nombre de "Sistema Automatico" porque la API no sabía quién llamaba.
     """
-    from app.services.usuario_service import obtener_usuario_sistema
-    return obtener_usuario_sistema(db).id_usuario
+    return usuario.id_usuario
 
 
 def _tiene_cp(db: Session, id_factura: int) -> bool:
@@ -278,6 +290,7 @@ def actualizar_factura(
     id_factura: int,
     datos: FacturaActualizar,
     db: Session = Depends(get_db),
+    usuario: Usuarios = Depends(usuario_actual),
 ):
     """
     Guarda las correcciones manuales y, si la factura ya tiene OC + CP,
@@ -305,7 +318,7 @@ def actualizar_factura(
         f.id_orden_compra = None
         if estado_actual == "Revisada":
             db.commit()
-            revertir_revisada(db, id_factura, _obtener_usuario_actual(db))
+            revertir_revisada(db, id_factura, _obtener_usuario_actual(usuario))
             f = db.query(Facturas).filter(Facturas.id_factura == id_factura).first()
 
     db.commit()
@@ -314,7 +327,7 @@ def actualizar_factura(
     reconciliar(db)
 
     # Solo después de reconciliar tiene sentido evaluar si está completa
-    id_usuario = _obtener_usuario_actual(db)
+    id_usuario = _obtener_usuario_actual(usuario)
     aplicada, motivo = marcar_revisada(db, id_factura, id_usuario)
 
     return {
@@ -323,8 +336,9 @@ def actualizar_factura(
     }
 
 @router.patch("/{id_factura}/revisar", tags=["Facturas"])
-def marcar_revisada_endpoint(id_factura: int, db: Session = Depends(get_db)):
-    id_usuario = _obtener_usuario_actual(db)
+def marcar_revisada_endpoint(id_factura: int, db: Session = Depends(get_db),
+                             usuario: Usuarios = Depends(usuario_actual)):
+    id_usuario = _obtener_usuario_actual(usuario)
     aplicada, motivo = marcar_revisada(db, id_factura, id_usuario)
     if not aplicada:
         raise HTTPException(status_code=400, detail=motivo)
@@ -332,8 +346,9 @@ def marcar_revisada_endpoint(id_factura: int, db: Session = Depends(get_db)):
 
 
 @router.patch("/{id_factura}/revertir-revision", tags=["Facturas"])
-def revertir_revision_endpoint(id_factura: int, db: Session = Depends(get_db)):
-    id_usuario = _obtener_usuario_actual(db)
+def revertir_revision_endpoint(id_factura: int, db: Session = Depends(get_db),
+                               usuario: Usuarios = Depends(usuario_actual)):
+    id_usuario = _obtener_usuario_actual(usuario)
     aplicada, motivo = revertir_revisada(db, id_factura, id_usuario)
     if not aplicada:
         raise HTTPException(status_code=400, detail=motivo)
@@ -349,12 +364,13 @@ def cancelar_factura_endpoint(
     id_factura: int,
     datos: CancelarRequest,
     db: Session = Depends(get_db),
+    usuario: Usuarios = Depends(usuario_actual),
 ):
     """
     Cambia el estado de la factura a 'Cancelada'.
     No borra nada de la BD. Registra el evento en HistorialVerificacion.
     """
-    id_usuario = _obtener_usuario_actual(db)
+    id_usuario = _obtener_usuario_actual(usuario)
 
     try:
         cancelar_factura(db, id_factura, datos.motivo, id_usuario)
@@ -398,13 +414,14 @@ def cancelar_cp_endpoint(
     id_cp: int,
     datos: CancelarRequest,
     db: Session = Depends(get_db),
+    usuario: Usuarios = Depends(usuario_actual),
 ):
     """
     Cancela un CP administrativamente.
     Revierte fecha_liquidacion en las facturas que liquidó
     y llama a reconciliar() para recalcular sus estados.
     """
-    id_usuario = _obtener_usuario_actual(db)
+    id_usuario = _obtener_usuario_actual(usuario)
 
     try:
         cp = cancelar_cp(db, id_cp, datos.motivo, id_usuario)
@@ -482,16 +499,35 @@ def obtener_ocs_candidatas(id_factura: int, db: Session = Depends(get_db)):
     if not f.numero_oc:
         return []
 
-    ocs = db.query(OrdenesCompra).filter(OrdenesCompra.numero_oc == f.numero_oc).all()
+    # Por llave normalizada y, si no hay, por núcleo numérico: "BOS-507-91753."
+    # en la factura encuentra la OC "BOS-507-91753"; "10003766965" encuentra
+    # "C-10003766965". Es una lista para que el usuario elija, así que aquí
+    # sí conviene ser generoso.
+    llave = clave_oc(f.numero_oc)
+    nucleo = nucleo_numerico(f.numero_oc)
+    todas = db.query(OrdenesCompra).options(load_only(
+        OrdenesCompra.id, OrdenesCompra.numero_oc, OrdenesCompra.numero_oc_detectado,
+        OrdenesCompra.confianza_oc, OrdenesCompra.nombre_archivo, OrdenesCompra.fecha_recepcion,
+    )).filter(OrdenesCompra.numero_oc.isnot(None)).all()
+    ocs = [oc for oc in todas if clave_oc(oc.numero_oc) == llave]
+    if not ocs and nucleo and len(nucleo) >= 5:
+        ocs = [oc for oc in todas if nucleo_numerico(oc.numero_oc) == nucleo]
+
+    con_archivo = {
+        fila[0] for fila in db.query(OrdenesCompra.id).filter(
+            OrdenesCompra.id.in_([oc.id for oc in ocs]), OrdenesCompra.archivo.isnot(None)
+        ).all()
+    } if ocs else set()
 
     return [
         OrdenCompraListado(
             id=oc.id,
             numero_oc=oc.numero_oc,
             numero_oc_detectado=oc.numero_oc_detectado,
+            confianza_oc=oc.confianza_oc,
             nombre_archivo=oc.nombre_archivo,
             fecha_recepcion=oc.fecha_recepcion,
-            tiene_archivo=oc.archivo is not None,
+            tiene_archivo=oc.id in con_archivo,
             facturas_asociadas=db.query(Facturas)
                 .filter(Facturas.id_orden_compra == oc.id)
                 .count(),
@@ -510,13 +546,7 @@ def descargar_pdf(id_factura: int, db: Session = Depends(get_db)):
     if not f or not f.pdf_factura:
         raise HTTPException(status_code=404, detail="PDF no disponible")
 
-    return Response(
-        content=f.pdf_factura,
-        media_type="application/pdf",
-        headers={
-            "Content-Disposition": f'inline; filename="{f.folio_interno or f.id_factura}.pdf"'
-        },
-    )
+    return respuesta_archivo(f.pdf_factura, f.folio_interno, respaldo=f"factura_{f.id_factura}")
 
 
 @router.get("/{id_factura}/xml", tags=["Facturas"])
@@ -525,10 +555,7 @@ def descargar_xml(id_factura: int, db: Session = Depends(get_db)):
     if not f or not f.xml_factura:
         raise HTTPException(status_code=404, detail="XML no disponible")
 
-    return Response(
-        content=f.xml_factura,
-        media_type="application/xml",
-        headers={
-            "Content-Disposition": f'attachment; filename="{f.folio_interno or f.id_factura}.xml"'
-        },
+    return respuesta_archivo(
+        f.xml_factura, f.folio_interno, respaldo=f"factura_{f.id_factura}",
+        media_type="application/xml", extension=".xml", inline=False,
     )

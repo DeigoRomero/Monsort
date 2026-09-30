@@ -1,3 +1,4 @@
+import logging
 # Dos endpoints de reportes PDF:
 #   POST /reportes/general     → reporte general filtrado
 #   GET  /reportes/detalle/{id} → reporte por factura
@@ -7,11 +8,13 @@ from sqlalchemy.orm import Session
 from datetime import datetime
 
 from app.BaseDeDatos import get_db
+from app.core.descargas import respuesta_archivo
 from app.esquemas.factura import FiltrosFactura
 from app.services.reporte_service import generar_reporte_general, generar_reporte_detalle
 from app.esquemas.factura_recibida import FiltrosFacturaRecibida
 from app.services.reporte_recibidas_service import generar_reporte_recibidas
 router = APIRouter()
+logger = logging.getLogger(__name__)
 
 
 @router.get("/general", tags=["Reportes"])
@@ -33,20 +36,18 @@ def reporte_general(
 
     solo_ciclo_completo=true recupera ese comportamiento, ahora explicito.
 
-    Columnas: Importe (subtotal del CFDI), IVA y Total, mas Total MXN con la
-    conversion por tipo de cambio.
+    Columnas: Importe (subtotal del CFDI), IVA y Total, mas Importe MXN con la
+    conversion por tipo de cambio. El total facturado se suma sobre el importe.
     """
     try:
         pdf_bytes = generar_reporte_general(db, filtros, solo_ciclo_completo)
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Error generando reporte: {str(e)}")
+    except Exception:
+        # La traza va al log; el mensaje al cliente no revela internos.
+        logger.exception("Error generando reporte")
+        raise HTTPException(status_code=500, detail="No se pudo generar el reporte")
 
     nombre = f"reporte_general_{datetime.now().strftime('%Y%m%d_%H%M')}.pdf"
-    return Response(
-        content=pdf_bytes,
-        media_type="application/pdf",
-        headers={"Content-Disposition": f'attachment; filename="{nombre}"'},
-    )
+    return respuesta_archivo(pdf_bytes, nombre, respaldo="reporte", inline=False)
 
 
 @router.get("/detalle/{id_factura}", tags=["Reportes"])
@@ -62,15 +63,13 @@ def reporte_detalle(
         pdf_bytes = generar_reporte_detalle(db, id_factura)
     except ValueError as e:
         raise HTTPException(status_code=404, detail=str(e))
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Error generando reporte: {str(e)}")
+    except Exception:
+        # La traza va al log; el mensaje al cliente no revela internos.
+        logger.exception("Error generando reporte")
+        raise HTTPException(status_code=500, detail="No se pudo generar el reporte")
 
     nombre = f"factura_{id_factura}_detalle_{datetime.now().strftime('%Y%m%d_%H%M')}.pdf"
-    return Response(
-        content=pdf_bytes,
-        media_type="application/pdf",
-        headers={"Content-Disposition": f'attachment; filename="{nombre}"'},
-    )
+    return respuesta_archivo(pdf_bytes, nombre, respaldo="reporte", inline=False)
 
 @router.get("/recibidas", tags=["Reportes"])
 def reporte_recibidas(
@@ -90,14 +89,10 @@ def reporte_recibidas(
     """
     try:
         pdf_bytes = generar_reporte_recibidas(db, filtros)
-    except Exception as e:
-        raise HTTPException(
-            status_code=500, detail=f"Error generando reporte: {str(e)}"
-        )
+    except Exception:
+        # La traza va al log; el mensaje al cliente no revela internos.
+        logger.exception("Error generando reporte")
+        raise HTTPException(status_code=500, detail="No se pudo generar el reporte")
  
     nombre = f"reporte_recibidas_{datetime.now().strftime('%Y%m%d_%H%M')}.pdf"
-    return Response(
-        content=pdf_bytes,
-        media_type="application/pdf",
-        headers={"Content-Disposition": f'attachment; filename="{nombre}"'},
-    )
+    return respuesta_archivo(pdf_bytes, nombre, respaldo="reporte", inline=False)

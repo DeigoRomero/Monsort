@@ -11,3 +11,4 @@ from app.modelos.solicitud_sat import SolicitudesSAT
 from app.modelos.facturas_recibidas import FacturasRecibidas
 from app.modelos.metadata_emitida import MetadataEmitidas
 from app.modelos.sincronizacion_portal import SincronizacionesPortal
+from app.modelos.notificacion import Notificaciones

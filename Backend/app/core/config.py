@@ -15,6 +15,9 @@ class Settings(BaseSettings):
     GMAIL_REDIRECT_URI: str = "http://localhost:8000/auth/gmail/callback"
     CORS_ORIGINS: str = "http://localhost:5173,http://127.0.0.1:5173"
     ENTORNO: str = "desarrollo"  # desarrollo, produccion
+    # Hosts que la API acepta en el encabezado Host (TrustedHostMiddleware).
+    # Solo se aplica en produccion; "*" lo desactiva.
+    HOSTS_PERMITIDOS: str = "facturas.grupomonsort.com,localhost,127.0.0.1"
     RFC_EMPRESA: str = "MSF140227BF7"
     # Portal de CFDI del SAT (Backend/sat_portal). Usa las mismas SAT_CER_PATH,
     # SAT_KEY_PATH y SAT_KEY_PASSWORD de la e.firma.

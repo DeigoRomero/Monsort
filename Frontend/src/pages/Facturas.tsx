@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { Fragment, useEffect, useState, type ReactNode } from "react";
 import {
   listarFacturas,
   listarEstados,
@@ -22,6 +22,8 @@ import {
 import { ApiError } from "../api/client";
 import { CancelarModal } from "../Components/CancelarModal";
 import { ArchivoLink } from "../Components/ArchivoLink";
+import { BotonFiltros, Flecha, Plegable, VistaAnimada } from "../Components/Animaciones";
+import { useSalida } from "../Components/movimiento";
 import "./Facturas.css";
 
 function estiloEstado(nombre: string) {
@@ -115,6 +117,10 @@ export function Facturas() {
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [idSeleccionado, setIdSeleccionado] = useState<number | null>(null);
+  // Fila con el resumen desplegado (acordeón). Una a la vez.
+  const [expandido, setExpandido] = useState<number | null>(null);
+  const [filtrosAbiertos, setFiltrosAbiertos] = useState(false);
+  const { saliendo, salir } = useSalida();
 
   const [q, setQ] = useState("");
   const [cliente, setCliente] = useState("");
@@ -194,19 +200,34 @@ export function Facturas() {
     }
   }
 
+  // Filtros aplicados además de la búsqueda: se muestran en el botón aunque
+  // el panel esté cerrado, para que nadie se confunda con una tabla filtrada.
+  const filtrosActivos = [
+    cliente, numeroOc, estadoFiltro, origen, fechaDesde, fechaHasta,
+  ].filter(Boolean).length + (conCp !== "todos" ? 1 : 0) + (incluirCanceladas ? 1 : 0);
+
+  function abrirDetalle(id: number) {
+    salir(() => setIdSeleccionado(id));
+  }
+
   if (idSeleccionado !== null) {
     return (
-      <FacturaDetalleView
-        idFactura={idSeleccionado}
-        onVolver={() => {
-          setIdSeleccionado(null);
-          cargar(pagina);
-        }}
-      />
+      <VistaAnimada key={`detalle-${idSeleccionado}`} tipo="detalle" saliendo={saliendo}>
+        <FacturaDetalleView
+          idFactura={idSeleccionado}
+          onVolver={() =>
+            salir(() => {
+              setIdSeleccionado(null);
+              cargar(pagina);
+            })
+          }
+        />
+      </VistaAnimada>
     );
   }
 
   return (
+    <VistaAnimada key="listado" tipo="listado" saliendo={saliendo}>
     <div className="facturas-panel">
       <div className="facturas-header">
         <div>
@@ -222,13 +243,23 @@ export function Facturas() {
       </div>
 
       <div className="facturas-filtros">
-        <input
-          className="field-input facturas-buscador"
-          placeholder="Buscar por cliente, UUID, folio interno u OC…"
-          value={q}
-          onChange={(e) => setQ(e.target.value)}
-        />
+        <div className="filtros-barra">
+          <input
+            className="field-input facturas-buscador"
+            placeholder="Buscar por cliente, UUID, folio interno u OC…"
+            value={q}
+            onChange={(e) => setQ(e.target.value)}
+          />
+          <BotonFiltros
+            abierto={filtrosAbiertos}
+            activos={filtrosActivos}
+            onClick={() => setFiltrosAbiertos((v) => !v)}
+            controla="filtros-emitidas"
+          />
+        </div>
 
+        <Plegable abierto={filtrosAbiertos} id="filtros-emitidas">
+        <div className="filtros-plegables">
         <div className="facturas-filtros-grid">
           <input
             className="field-input"
@@ -304,6 +335,8 @@ export function Facturas() {
             Incluir canceladas
           </label>
         </div>
+        </div>
+        </Plegable>
       </div>
 
       {resumen && (
@@ -361,13 +394,21 @@ export function Facturas() {
               {facturas.map((f) => {
                 const historica = esHistorica(f.estado);
                 const cancelada = f.estado.toLowerCase().includes("cancel");
+                const abierta = expandido === f.id_factura;
                 return (
+                  <Fragment key={f.id_factura}>
                   <tr
-                    key={f.id_factura}
-                    className={`facturas-row${cancelada ? " facturas-row-cancelada" : ""}`}
-                    onClick={() => setIdSeleccionado(f.id_factura)}
+                    className={`facturas-row${cancelada ? " facturas-row-cancelada" : ""}${
+                      abierta ? " facturas-row-expandida" : ""
+                    }`}
+                    onClick={() => setExpandido(abierta ? null : f.id_factura)}
+                    onDoubleClick={() => abrirDetalle(f.id_factura)}
+                    aria-expanded={abierta}
                   >
                     <td className="facturas-cell-strong">
+                      <span className="fila-flecha">
+                        <Flecha abierta={abierta} />
+                      </span>
                       {f.folio_fiscal}
                       {historica && (
                         <span className="facturas-tag-historico">histórico</span>
@@ -394,6 +435,14 @@ export function Facturas() {
                       />
                     </td>
                   </tr>
+                  <tr className="fila-acordeon">
+                    <td colSpan={7}>
+                      <Plegable abierto={abierta}>
+                        <ResumenFila factura={f} onVerDetalle={() => abrirDetalle(f.id_factura)} />
+                      </Plegable>
+                    </td>
+                  </tr>
+                  </Fragment>
                 );
               })}
             </tbody>
@@ -409,7 +458,10 @@ export function Facturas() {
             <button
               className="factura-btn-secondary"
               disabled={pagina <= 1}
-              onClick={() => cargar(pagina - 1)}
+              onClick={() => {
+                setExpandido(null);
+                cargar(pagina - 1);
+              }}
             >
               ← Anterior
             </button>
@@ -419,13 +471,75 @@ export function Facturas() {
             <button
               className="factura-btn-secondary"
               disabled={pagina >= totalPaginas}
-              onClick={() => cargar(pagina + 1)}
+              onClick={() => {
+                setExpandido(null);
+                cargar(pagina + 1);
+              }}
             >
               Siguiente →
             </button>
           </div>
         </>
       )}
+    </div>
+    </VistaAnimada>
+  );
+}
+
+/**
+ * Resumen que se despliega bajo la fila (acordeón): lo que más se consulta
+ * sin tener que abrir el detalle completo.
+ */
+function ResumenFila({
+  factura: f,
+  onVerDetalle,
+}: {
+  factura: FacturaListado;
+  onVerDetalle: () => void;
+}) {
+  const moneda = f.moneda && f.moneda !== "MXN" ? ` ${f.moneda}` : "";
+  const dato = (etiqueta: string, valor: ReactNode, mono = false) => (
+    <div className="fila-acordeon-dato">
+      <span className="fila-acordeon-etiqueta">{etiqueta}</span>
+      <span className={`fila-acordeon-valor${mono ? " fila-acordeon-mono" : ""}`}>
+        {valor ?? "—"}
+      </span>
+    </div>
+  );
+  const chip = (texto: string, hay: boolean) => (
+    <span className={`chip-archivo${hay ? "" : " chip-archivo-falta"}`}>{texto}</span>
+  );
+  return (
+    <div className="fila-acordeon-contenido">
+      {dato("Folio interno", f.folio_interno)}
+      {dato("OC", f.numero_oc, true)}
+      {dato("RFC", f.rfc, true)}
+      {dato("Importe", `$${formatMonto(f.subtotal)}${moneda}`, true)}
+      {dato("IVA", `$${formatMonto(f.iva)}${moneda}`, true)}
+      {dato("Total", `$${formatMonto(f.total)}${moneda}`, true)}
+      {moneda && dato("Tipo de cambio", f.tipo_cambio, true)}
+      {dato("Fecha límite de pago", f.fecha_limite_pago)}
+      {dato("Liquidada", f.fecha_liquidacion)}
+      <div className="fila-acordeon-dato">
+        <span className="fila-acordeon-etiqueta">Documentos</span>
+        <span className="chips-archivos">
+          {chip("PDF", f.tiene_pdf)}
+          {chip("XML", f.tiene_xml)}
+          {chip("OC", f.tiene_oc)}
+          {chip("CP", f.tiene_cp)}
+        </span>
+      </div>
+      <div className="fila-acordeon-acciones">
+        <button
+          className="factura-btn-primary"
+          onClick={(e) => {
+            e.stopPropagation();
+            onVerDetalle();
+          }}
+        >
+          Ver detalle completo →
+        </button>
+      </div>
     </div>
   );
 }

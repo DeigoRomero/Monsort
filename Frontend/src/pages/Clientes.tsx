@@ -9,6 +9,8 @@ import {
 } from "../api/clientes";
 import { ApiError } from "../api/client";
 import "./Facturas.css";
+import { VistaAnimada } from "../Components/Animaciones";
+import { useSalida } from "../Components/movimiento";
 
 export function Clientes() {
   const [clientes, setClientes] = useState<Cliente[]>([]);
@@ -16,6 +18,7 @@ export function Clientes() {
   const [error, setError] = useState<string | null>(null);
   const [soloActivos, setSoloActivos] = useState(true);
   const [seleccionado, setSeleccionado] = useState<number | null>(null);
+  const { saliendo, salir } = useSalida();
   const [mostrarCrear, setMostrarCrear] = useState(false);
 
   useEffect(() => {
@@ -39,28 +42,37 @@ export function Clientes() {
 
   if (seleccionado !== null) {
     return (
-      <DetalleCliente
-        idCliente={seleccionado}
-        onVolver={() => {
-          setSeleccionado(null);
-          cargar();
-        }}
-      />
+      <VistaAnimada key={`detalle-${seleccionado}`} tipo="detalle" saliendo={saliendo}>
+        <DetalleCliente
+          idCliente={seleccionado}
+          onVolver={() =>
+            salir(() => {
+              setSeleccionado(null);
+              cargar();
+            })
+          }
+        />
+      </VistaAnimada>
     );
   }
 
   if (mostrarCrear) {
     return (
-      <CrearCliente
-        onVolver={() => {
-          setMostrarCrear(false);
-          cargar();
-        }}
-      />
+      <VistaAnimada key="crear" tipo="detalle" saliendo={saliendo}>
+        <CrearCliente
+          onVolver={() =>
+            salir(() => {
+              setMostrarCrear(false);
+              cargar();
+            })
+          }
+        />
+      </VistaAnimada>
     );
   }
 
   return (
+    <VistaAnimada key="listado" tipo="listado" saliendo={saliendo}>
     <div className="facturas-panel">
       <div className="facturas-header">
         <div>
@@ -78,7 +90,7 @@ export function Clientes() {
           </label>
           <button
             className="factura-btn-primary"
-            onClick={() => setMostrarCrear(true)}
+            onClick={() => salir(() => setMostrarCrear(true))}
           >
             + Nuevo cliente
           </button>
@@ -106,7 +118,7 @@ export function Clientes() {
               <tr
                 key={c.id}
                 className={`facturas-row${!c.activo ? " facturas-row-cancelada" : ""}`}
-                onClick={() => setSeleccionado(c.id)}
+                onClick={() => salir(() => setSeleccionado(c.id))}
               >
                 <td className="facturas-cell-strong facturas-cell-mono">
                   {c.rfc}
@@ -142,6 +154,7 @@ export function Clientes() {
         <p className="facturas-status">No hay clientes registrados.</p>
       )}
     </div>
+    </VistaAnimada>
   );
 }
 

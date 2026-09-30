@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { Fragment, useEffect, useState, type ReactNode } from "react";
 import {
   listarFacturasRecibidas,
   listarEmisores,
@@ -17,6 +17,8 @@ import {
   type CorridaPortal,
 } from "../api/facturas-recibidas";
 import { ArchivoLink } from "../Components/ArchivoLink";
+import { BotonFiltros, Flecha, Plegable, VistaAnimada } from "../Components/Animaciones";
+import { useSalida } from "../Components/movimiento";
 import { ApiError } from "../api/client";
 import "./Facturas.css";
 import { useAuth } from "../context/AuthContext";
@@ -135,6 +137,9 @@ export function FacturasRecibidas() {
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [idSeleccionado, setIdSeleccionado] = useState<number | null>(null);
+  const [expandido, setExpandido] = useState<number | null>(null);
+  const [filtrosAbiertos, setFiltrosAbiertos] = useState(false);
+  const { saliendo, salir } = useSalida();
   const [mostrarHistorial, setMostrarHistorial] = useState(false);
 
   const [q, setQ] = useState("");
@@ -243,20 +248,35 @@ export function FacturasRecibidas() {
     }
   }
 
+  // "Solo facturas" viene prendido por defecto: cuenta como filtro si se apaga.
+  const filtrosActivos = [rfcEmisor, satEstado, fechaDesde, fechaHasta].filter(Boolean).length
+    + (soloFacturas ? 0 : 1);
+
+  function abrirDetalle(id: number) {
+    salir(() => setIdSeleccionado(id));
+  }
+
   if (idSeleccionado !== null) {
     return (
-      <FacturaRecibidaDetalleView
-        id={idSeleccionado}
-        onVolver={() => setIdSeleccionado(null)}
-      />
+      <VistaAnimada key={`detalle-${idSeleccionado}`} tipo="detalle" saliendo={saliendo}>
+        <FacturaRecibidaDetalleView
+          id={idSeleccionado}
+          onVolver={() => salir(() => setIdSeleccionado(null))}
+        />
+      </VistaAnimada>
     );
   }
 
   if (mostrarHistorial) {
-    return <HistorialSincronizacion onVolver={() => setMostrarHistorial(false)} />;
+    return (
+      <VistaAnimada key="historial" tipo="detalle" saliendo={saliendo}>
+        <HistorialSincronizacion onVolver={() => salir(() => setMostrarHistorial(false))} />
+      </VistaAnimada>
+    );
   }
 
   return (
+    <VistaAnimada key="listado" tipo="listado" saliendo={saliendo}>
     <div className="facturas-panel">
       <div className="facturas-header">
         <div>
@@ -277,7 +297,7 @@ export function FacturasRecibidas() {
           )}
           <button
             className="factura-btn-secondary"
-            onClick={() => setMostrarHistorial(true)}
+            onClick={() => salir(() => setMostrarHistorial(true))}
           >
             Historial
           </button>
@@ -305,13 +325,23 @@ export function FacturasRecibidas() {
       </p>
 
       <div className="facturas-filtros">
-        <input
-          className="field-input facturas-buscador"
-          placeholder="Buscar por folio fiscal, RFC o nombre del emisor…"
-          value={q}
-          onChange={(e) => setQ(e.target.value)}
-        />
+        <div className="filtros-barra">
+          <input
+            className="field-input facturas-buscador"
+            placeholder="Buscar por folio fiscal, RFC o nombre del emisor…"
+            value={q}
+            onChange={(e) => setQ(e.target.value)}
+          />
+          <BotonFiltros
+            abierto={filtrosAbiertos}
+            activos={filtrosActivos}
+            onClick={() => setFiltrosAbiertos((v) => !v)}
+            controla="filtros-recibidas"
+          />
+        </div>
 
+        <Plegable abierto={filtrosAbiertos} id="filtros-recibidas">
+        <div className="filtros-plegables">
         <div className="facturas-filtros-grid">
           <select
             className="field-input"
@@ -364,6 +394,8 @@ export function FacturasRecibidas() {
             Solo facturas (excluir notas de crédito y otros)
           </label>
         </div>
+        </div>
+        </Plegable>
       </div>
 
       {resumen && (
@@ -413,20 +445,27 @@ export function FacturasRecibidas() {
               </tr>
             </thead>
             <tbody>
-              {facturas.map((f) => (
+              {facturas.map((f) => {
+                const abierta = expandido === f.id_factura_recibida;
+                return (
+                <Fragment key={f.id_factura_recibida}>
                 <tr
-                  key={f.id_factura_recibida}
                   className={`facturas-row${
                     (f.sat_estado ?? "").toLowerCase().includes("cancel")
                       ? " facturas-row-cancelada"
                       : ""
-                  }`}
-                  onClick={() => setIdSeleccionado(f.id_factura_recibida)}
+                  }${abierta ? " facturas-row-expandida" : ""}`}
+                  onClick={() => setExpandido(abierta ? null : f.id_factura_recibida)}
+                  onDoubleClick={() => abrirDetalle(f.id_factura_recibida)}
+                  aria-expanded={abierta}
                 >
                   <td
                     className="facturas-cell-strong"
                     style={{ fontFamily: "var(--font-mono)", fontSize: 12 }}
                   >
+                    <span className="fila-flecha">
+                      <Flecha abierta={abierta} />
+                    </span>
                     {f.folio_fiscal.slice(0, 8)}…
                   </td>
                   <td>{f.nombre_emisor ?? f.rfc_emisor}</td>
@@ -451,7 +490,19 @@ export function FacturasRecibidas() {
                     )}
                   </td>
                 </tr>
-              ))}
+                <tr className="fila-acordeon">
+                  <td colSpan={6}>
+                    <Plegable abierto={abierta}>
+                      <ResumenRecibida
+                        factura={f}
+                        onVerDetalle={() => abrirDetalle(f.id_factura_recibida)}
+                      />
+                    </Plegable>
+                  </td>
+                </tr>
+                </Fragment>
+                );
+              })}
             </tbody>
           </table>
 
@@ -465,7 +516,10 @@ export function FacturasRecibidas() {
             <button
               className="factura-btn-secondary"
               disabled={pagina <= 1}
-              onClick={() => cargar(pagina - 1)}
+              onClick={() => {
+                setExpandido(null);
+                cargar(pagina - 1);
+              }}
             >
               ← Anterior
             </button>
@@ -475,13 +529,73 @@ export function FacturasRecibidas() {
             <button
               className="factura-btn-secondary"
               disabled={pagina >= totalPaginas}
-              onClick={() => cargar(pagina + 1)}
+              onClick={() => {
+                setExpandido(null);
+                cargar(pagina + 1);
+              }}
             >
               Siguiente →
             </button>
           </div>
         </>
       )}
+    </div>
+    </VistaAnimada>
+  );
+}
+
+// Clave del SAT (TipoDeComprobante) -> nombre que entiende cualquiera
+const TIPOS_COMPROBANTE: Record<string, string> = {
+  I: "Ingreso (factura)",
+  E: "Egreso (nota de crédito)",
+  P: "Pago",
+  T: "Traslado",
+  N: "Nómina",
+};
+
+/** Resumen desplegable bajo la fila (acordeón). */
+function ResumenRecibida({
+  factura: f,
+  onVerDetalle,
+}: {
+  factura: FacturaRecibidaListado;
+  onVerDetalle: () => void;
+}) {
+  const dato = (etiqueta: string, valor: ReactNode, mono = false) => (
+    <div className="fila-acordeon-dato">
+      <span className="fila-acordeon-etiqueta">{etiqueta}</span>
+      <span className={`fila-acordeon-valor${mono ? " fila-acordeon-mono" : ""}`}>
+        {valor ?? "—"}
+      </span>
+    </div>
+  );
+  return (
+    <div className="fila-acordeon-contenido">
+      {dato("Folio fiscal", f.folio_fiscal, true)}
+      {dato("RFC emisor", f.rfc_emisor, true)}
+      {dato("Monto", `$${formatMonto(f.monto_total)}`, true)}
+      {dato("Tipo", TIPOS_COMPROBANTE[f.efecto_comprobante ?? ""] ?? f.efecto_comprobante)}
+      {f.fecha_cancelacion && dato("Cancelada el", f.fecha_cancelacion.slice(0, 10))}
+      <div className="fila-acordeon-acciones">
+        {f.tiene_xml && (
+          <ArchivoLink
+            className="factura-btn-secondary"
+            accion={() => descargarXmlRecibida(f.id_factura_recibida)}
+            detenerClic
+          >
+            Descargar XML
+          </ArchivoLink>
+        )}
+        <button
+          className="factura-btn-primary"
+          onClick={(e) => {
+            e.stopPropagation();
+            onVerDetalle();
+          }}
+        >
+          Ver detalle completo →
+        </button>
+      </div>
     </div>
   );
 }

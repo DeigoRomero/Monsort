@@ -3,6 +3,7 @@
 }
 
 .notif-contador {
+  animation: notif-contador-entra 240ms cubic-bezier(0.2, 0.8, 0.2, 1);
   min-width: 18px;
   padding: 1px 6px;
   border-radius: 999px;
@@ -31,6 +32,22 @@
   border-radius: 10px;
   box-shadow: 0 12px 32px rgba(15, 23, 42, 0.18);
   z-index: 50;
+  transform-origin: top left;
+  animation: notif-panel-entra 180ms cubic-bezier(0.2, 0.8, 0.2, 1) both;
+}
+
+.notif-panel-cerrando {
+  animation: notif-panel-sale 160ms cubic-bezier(0.4, 0, 1, 1) both;
+}
+
+@keyframes notif-panel-entra {
+  from { opacity: 0; transform: translateX(-6px) scale(0.97); }
+  to   { opacity: 1; transform: none; }
+}
+
+@keyframes notif-panel-sale {
+  from { opacity: 1; transform: none; }
+  to   { opacity: 0; transform: translateX(-6px) scale(0.97); }
 }
 
 .notif-panel-encabezado {
@@ -81,6 +98,7 @@
   padding: 10px 14px;
   border-left: 3px solid transparent;
   cursor: pointer;
+  transition: background 0.15s ease;
 }
 
 .notif-item:hover {
@@ -138,6 +156,15 @@
   animation: notif-entrada 0.25s ease-out;
 }
 
+.notif-avisos .notif-aviso-saliendo {
+  animation: notif-salida 160ms cubic-bezier(0.4, 0, 1, 1) both;
+}
+
+@keyframes notif-salida {
+  from { transform: none; opacity: 1; }
+  to   { transform: translateX(24px); opacity: 0; }
+}
+
 .notif-avisos .notif-cerrar {
   position: absolute;
   top: 8px;
@@ -147,4 +174,9 @@
 @keyframes notif-entrada {
   from { transform: translateY(12px); opacity: 0; }
   to { transform: translateY(0); opacity: 1; }
+}
+
+@keyframes notif-contador-entra {
+  from { transform: scale(0.5); opacity: 0; }
+  to   { transform: scale(1); opacity: 1; }
 }

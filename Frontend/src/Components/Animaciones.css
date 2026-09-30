@@ -1,0 +1,206 @@
+/* ---------- Curvas y tiempos compartidos ---------- */
+:root {
+  --curva-salida: cubic-bezier(0.2, 0.8, 0.2, 1);
+  --curva-entrada: cubic-bezier(0.4, 0, 1, 1);
+}
+
+/* ---------- Plegable (altura animada sin medir) ---------- */
+.plegable {
+  display: grid;
+  grid-template-rows: 0fr;
+  opacity: 0;
+  transition:
+    grid-template-rows 220ms var(--curva-salida),
+    opacity 180ms ease;
+}
+
+.plegable-abierto {
+  grid-template-rows: 1fr;
+  opacity: 1;
+}
+
+.plegable-interior {
+  min-height: 0;
+  overflow: hidden;
+}
+
+/* ---------- Botón de filtros ---------- */
+.boton-filtros {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  align-self: flex-start;
+  padding: 7px 12px;
+  border: 1px solid var(--hairline);
+  border-radius: 6px;
+  background: var(--paper-high);
+  color: var(--text-ink);
+  font-size: 13px;
+  cursor: pointer;
+  transition: background 0.15s ease, border-color 0.15s ease;
+}
+
+.boton-filtros:hover,
+.boton-filtros-abierto {
+  background: var(--paper);
+  border-color: rgba(22, 33, 58, 0.28);
+}
+
+.boton-filtros-contador {
+  min-width: 18px;
+  padding: 1px 6px;
+  border-radius: 999px;
+  background: var(--seal);
+  color: #fff;
+  font-size: 11px;
+  font-weight: 600;
+  text-align: center;
+}
+
+.flecha {
+  color: var(--text-muted);
+  transition: transform 200ms var(--curva-salida);
+}
+
+.flecha-abierta {
+  transform: rotate(180deg);
+}
+
+/* Fila de búsqueda + botón de filtros */
+.filtros-barra {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+}
+
+.filtros-barra .facturas-buscador {
+  flex: 1;
+}
+
+.filtros-plegables {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  padding-top: 14px;
+}
+
+/* ---------- Cambio de pantalla (listado <-> detalle) ---------- */
+.vista-detalle {
+  animation: vista-entra-detalle 220ms var(--curva-salida) both;
+}
+
+.vista-listado {
+  animation: vista-entra-listado 200ms var(--curva-salida) both;
+}
+
+.vista-detalle.vista-saliendo {
+  animation: vista-sale-detalle 160ms var(--curva-entrada) both;
+}
+
+.vista-listado.vista-saliendo {
+  animation: vista-sale-listado 160ms var(--curva-entrada) both;
+}
+
+@keyframes vista-entra-detalle {
+  from { opacity: 0; transform: translateX(18px); }
+  to   { opacity: 1; transform: none; }
+}
+
+@keyframes vista-sale-detalle {
+  from { opacity: 1; transform: none; }
+  to   { opacity: 0; transform: translateX(18px); }
+}
+
+@keyframes vista-entra-listado {
+  from { opacity: 0; transform: translateY(6px); }
+  to   { opacity: 1; transform: none; }
+}
+
+@keyframes vista-sale-listado {
+  from { opacity: 1; transform: none; }
+  to   { opacity: 0; transform: translateX(-12px); }
+}
+
+/* ---------- Acordeón de filas ---------- */
+.facturas-row-expandida {
+  background: var(--paper);
+}
+
+.fila-acordeon > td {
+  padding: 0 !important;
+  border: none;
+}
+
+.fila-acordeon-contenido {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 14px 28px;
+  padding: 4px 24px 18px 50px;
+  background: var(--paper);
+  border-top: 1px dashed var(--hairline);
+}
+
+.fila-acordeon-dato {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 110px;
+}
+
+.fila-acordeon-etiqueta {
+  font-size: 11px;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+
+.fila-acordeon-valor {
+  font-size: 13px;
+  color: var(--text-ink);
+}
+
+.fila-acordeon-mono {
+  font-family: var(--font-mono);
+}
+
+.fila-acordeon-acciones {
+  margin-left: auto;
+  display: flex;
+  gap: 8px;
+}
+
+.fila-flecha {
+  display: inline-flex;
+  width: 16px;
+  margin-left: -20px;
+  margin-right: 4px;
+  vertical-align: middle;
+}
+
+.chips-archivos {
+  display: flex;
+  gap: 6px;
+}
+
+.chip-archivo {
+  padding: 2px 7px;
+  border-radius: 4px;
+  font-size: 11px;
+  font-weight: 600;
+  background: #e5f0e8;
+  color: #2e7d5b;
+}
+
+.chip-archivo-falta {
+  background: #eef0f3;
+  color: #8a92a5;
+  text-decoration: line-through;
+}
+
+/* Enlaces con aspecto de botón dentro del acordeón (ArchivoLink es un <a>) */
+.fila-acordeon-acciones a.factura-btn-secondary {
+  display: inline-flex;
+  align-items: center;
+  text-decoration: none;
+}

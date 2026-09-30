@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { listarNotificaciones, type Notificacion } from "../api/notificaciones";
+import { DURACION_SALIDA_MS, quiereMenosMovimiento } from "./movimiento";
 import "./Notificaciones.css";
 
 // El backend revisa Gmail cada 5 minutos y deja una notificación cuando algo
@@ -41,6 +42,10 @@ export function Notificaciones({ onIr }: { onIr: (seccion: string) => void }) {
   const [avisos, setAvisos] = useState<Notificacion[]>([]);
   const [ultimaRevision, setUltimaRevision] = useState<string | null>(null);
   const [abierto, setAbierto] = useState(false);
+  // El panel y los avisos se quedan montados mientras corre su animación de
+  // salida; sin esto React los quita de golpe.
+  const [panelCerrando, setPanelCerrando] = useState(false);
+  const [avisosSaliendo, setAvisosSaliendo] = useState<Set<number>>(new Set());
   const [visto, setVisto] = useState<number>(() => leerVisto() ?? 0);
   const [, forzar] = useState(0);
   const ultimoConocido = useRef<number | null>(null);
@@ -90,18 +95,68 @@ export function Notificaciones({ onIr }: { onIr: (seccion: string) => void }) {
     };
   }, [consultar]);
 
+  const descartarAviso = useCallback((id: number) => {
+    if (quiereMenosMovimiento()) {
+      setAvisos((prev) => prev.filter((a) => a.id !== id));
+      return;
+    }
+    setAvisosSaliendo((prev) => new Set(prev).add(id));
+    window.setTimeout(() => {
+      setAvisos((prev) => prev.filter((a) => a.id !== id));
+      setAvisosSaliendo((prev) => {
+        const siguiente = new Set(prev);
+        siguiente.delete(id);
+        return siguiente;
+      });
+    }, DURACION_SALIDA_MS);
+  }, []);
+
   useEffect(() => {
     if (!avisos.length) return;
-    const id = window.setTimeout(() => setAvisos((prev) => prev.slice(0, -1)), DURACION_AVISO_MS);
+    const masViejo = avisos[avisos.length - 1];
+    const id = window.setTimeout(() => descartarAviso(masViejo.id), DURACION_AVISO_MS);
     return () => window.clearTimeout(id);
-  }, [avisos]);
+  }, [avisos, descartarAviso]);
+
+  function cerrarPanel() {
+    if (!abierto || panelCerrando) return;
+    if (quiereMenosMovimiento()) {
+      setAbierto(false);
+      return;
+    }
+    setPanelCerrando(true);
+    window.setTimeout(() => {
+      setAbierto(false);
+      setPanelCerrando(false);
+    }, DURACION_SALIDA_MS);
+  }
+
+  // Cerrar con Escape o con clic fuera del panel
+  useEffect(() => {
+    if (!abierto) return;
+    const alTeclear = (e: KeyboardEvent) => e.key === "Escape" && cerrarPanel();
+    const alClic = (e: MouseEvent) => {
+      const objetivo = e.target as HTMLElement;
+      if (!objetivo.closest(".notif-panel") && !objetivo.closest(".notif-boton")) cerrarPanel();
+    };
+    document.addEventListener("keydown", alTeclear);
+    document.addEventListener("mousedown", alClic);
+    return () => {
+      document.removeEventListener("keydown", alTeclear);
+      document.removeEventListener("mousedown", alClic);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [abierto, panelCerrando]);
 
   const sinLeer = lista.filter((n) => n.id > visto).length;
 
   function abrirPanel() {
-    const abrir = !abierto;
-    setAbierto(abrir);
-    if (abrir && lista.length) {
+    if (abierto) {
+      cerrarPanel();
+      return;
+    }
+    setAbierto(true);
+    if (lista.length) {
       const maximo = Math.max(...lista.map((n) => n.id));
       guardarVisto(maximo);
       // Se marca leído al CERRAR, para que al abrir se vea qué era nuevo
@@ -111,8 +166,8 @@ export function Notificaciones({ onIr }: { onIr: (seccion: string) => void }) {
 
   function ir(n: Notificacion) {
     if (n.seccion) onIr(n.seccion);
-    setAvisos((prev) => prev.filter((a) => a.id !== n.id));
-    setAbierto(false);
+    descartarAviso(n.id);
+    cerrarPanel();
   }
 
   const puedePedirPermiso =
@@ -134,10 +189,14 @@ export function Notificaciones({ onIr }: { onIr: (seccion: string) => void }) {
       </p>
 
       {abierto && (
-        <div className="notif-panel" role="dialog" aria-label="Notificaciones">
+        <div
+          className={`notif-panel${panelCerrando ? " notif-panel-cerrando" : ""}`}
+          role="dialog"
+          aria-label="Notificaciones"
+        >
           <div className="notif-panel-encabezado">
             <strong>Notificaciones</strong>
-            <button className="notif-cerrar" onClick={() => setAbierto(false)} aria-label="Cerrar">
+            <button className="notif-cerrar" onClick={cerrarPanel} aria-label="Cerrar">
               ×
             </button>
           </div>
@@ -165,7 +224,13 @@ export function Notificaciones({ onIr }: { onIr: (seccion: string) => void }) {
 
       <div className="notif-avisos" aria-live="polite">
         {avisos.map((n) => (
-          <div key={n.id} className={`notif-aviso notif-${n.nivel}`} onClick={() => ir(n)}>
+          <div
+            key={n.id}
+            className={`notif-aviso notif-${n.nivel}${
+              avisosSaliendo.has(n.id) ? " notif-aviso-saliendo" : ""
+            }`}
+            onClick={() => ir(n)}
+          >
             <p className="notif-titulo">{n.titulo}</p>
             {n.detalle && <p className="notif-detalle">{n.detalle}</p>}
             <button
@@ -173,7 +238,7 @@ export function Notificaciones({ onIr }: { onIr: (seccion: string) => void }) {
               aria-label="Descartar"
               onClick={(e) => {
                 e.stopPropagation();
-                setAvisos((prev) => prev.filter((a) => a.id !== n.id));
+                descartarAviso(n.id);
               }}
             >
               ×

@@ -8,16 +8,36 @@ backend nuevo no puede iniciar sesión.
 Después del despliegue **todos vuelven a iniciar sesión una vez** (la
 migración invalida los refresh token guardados en claro).
 
+## Paso 0: subir los cambios (en Windows)
+
+Los archivos nuevos (`nginx-seguridad.conf`, `nginx-proxy.conf`, la
+migración, etc.) solo existen en la máquina de desarrollo hasta que se hace
+push. Sin esto, en el VPS "No such file or directory".
+
+```powershell
+cd D:\ProyectoMonsort
+git status                      # revisar que NO aparezca ningún .env
+git add -A
+git commit -m "Seguridad, detector de OC, dias para pago, notificaciones, total por importe"
+git pull --no-rebase origin main
+git push origin main
+```
+
 ## Pasos en el VPS
 
 ```bash
 ssh monsort@64.177.80.14
 cd /srv/monsort
 
-# 0. Respaldo
+# 1. Respaldo de la base
 sudo -u postgres pg_dump -Fc MonsortDB > ~/respaldo_$(date +%Y%m%d_%H%M).dump
 
-# 1. .env — revisar ANTES de reiniciar
+# 2. Traer el código y actualizar la copia del script
+cd /srv/monsort/ProyectoMonsort && git pull --no-rebase origin main && cd /srv/monsort
+ls ProyectoMonsort/despliegue/          # deben aparecer nginx-seguridad.conf y nginx-proxy.conf
+cp ProyectoMonsort/despliegue/despliegue.sh /srv/monsort/despliegue.sh && chmod +x /srv/monsort/despliegue.sh
+
+# 3. .env — revisar ANTES de reiniciar
 nano ProyectoMonsort/Backend/.env
 #   ENTORNO=produccion
 #   CORS_ORIGINS=https://facturas.grupomonsort.com
@@ -26,20 +46,24 @@ nano ProyectoMonsort/Backend/.env
 #       python3 -c "import secrets; print(secrets.token_urlsafe(64))"
 chmod 600 ProyectoMonsort/Backend/.env
 
-# 2. nginx: snippets + sitio
-sudo cp ProyectoMonsort/despliegue/nginx-seguridad.conf /etc/nginx/snippets/monsort-seguridad.conf
-sudo cp ProyectoMonsort/despliegue/nginx-proxy.conf     /etc/nginx/snippets/monsort-proxy.conf
-sudo cp /etc/nginx/sites-available/monsort ~/monsort-nginx.respaldo
-sudo cp ProyectoMonsort/despliegue/monsort-nginx.conf /etc/nginx/sites-available/monsort
-sudo nginx -t          # si falla: sudo cp ~/monsort-nginx.respaldo /etc/nginx/sites-available/monsort
-
-# 3. systemd endurecido
+# 4. systemd endurecido
 sudo cp ProyectoMonsort/despliegue/monsort-api.service /etc/systemd/system/monsort-api.service
 sudo systemctl daemon-reload
 
-# 4. Despliegue normal (pull, pip, alembic, build, rsync, restart, reload nginx)
-diff /srv/monsort/despliegue.sh ProyectoMonsort/despliegue/despliegue.sh   # después del pull
+# 5. Despliegue (migraciones, build, copia a /var/www/monsort, reinicio)
 ./despliegue.sh
+
+# 6. nginx. El archivo del sitio NO se llama necesariamente "monsort":
+#    buscar cuál es el que está activo.
+grep -rl "facturas.grupomonsort.com" /etc/nginx/sites-enabled/ /etc/nginx/conf.d/ 2>/dev/null
+ls -l /etc/nginx/sites-enabled/
+SITIO=/etc/nginx/sites-available/NOMBRE_QUE_SALIO    # <- ajustar
+sudo cp "$SITIO" ~/nginx-sitio.respaldo
+sudo cp ProyectoMonsort/despliegue/nginx-seguridad.conf /etc/nginx/snippets/monsort-seguridad.conf
+sudo cp ProyectoMonsort/despliegue/nginx-proxy.conf     /etc/nginx/snippets/monsort-proxy.conf
+sudo cp ProyectoMonsort/despliegue/monsort-nginx.conf "$SITIO"
+sudo nginx -t && sudo systemctl reload nginx
+# Si nginx -t falla:  sudo cp ~/nginx-sitio.respaldo "$SITIO" && sudo nginx -t
 ```
 
 La migración `a7c3e9d1f250` imprime las cuentas que desactiva. Deben ser dos:

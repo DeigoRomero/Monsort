@@ -7,6 +7,8 @@ import {
 } from "../api/ordenes-compra";
 import { ApiError } from "../api/client";
 import { ArchivoLink } from "../Components/ArchivoLink";
+import { VistaAnimada } from "../Components/Animaciones";
+import { useSalida } from "../Components/movimiento";
 import "./Facturas.css";
 
 /**
@@ -40,6 +42,7 @@ export function OrdenesCompra() {
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [seleccionada, setSeleccionada] = useState<OrdenCompra | null>(null);
+  const { saliendo, salir } = useSalida();
 
   useEffect(() => {
     listarOrdenes()
@@ -56,9 +59,10 @@ export function OrdenesCompra() {
 
   if (seleccionada) {
     return (
+      <VistaAnimada key={`detalle-${seleccionada.id}`} tipo="detalle" saliendo={saliendo}>
       <DetalleOC
         oc={seleccionada}
-        onVolver={() => setSeleccionada(null)}
+        onVolver={() => salir(() => setSeleccionada(null))}
         onGuardado={(actualizada) => {
           setOrdenes((prev) =>
             prev.map((o) => (o.id === actualizada.id ? actualizada : o))
@@ -66,12 +70,14 @@ export function OrdenesCompra() {
           setSeleccionada(actualizada);
         }}
       />
+      </VistaAnimada>
     );
   }
 
   const sinFactura = ordenes.filter((o) => o.sin_factura_30_dias).length;
 
   return (
+    <VistaAnimada key="listado" tipo="listado" saliendo={saliendo}>
     <div className="facturas-panel">
       <div className="facturas-header">
         <div>
@@ -114,7 +120,7 @@ export function OrdenesCompra() {
               <tr
                 key={o.id}
                 className="facturas-row"
-                onClick={() => setSeleccionada(o)}
+                onClick={() => salir(() => setSeleccionada(o))}
               >
                 <td className="facturas-cell-strong">
                   {o.numero_oc ?? <span style={{ color: "#8a92a5" }}>Sin número</span>}
@@ -156,6 +162,7 @@ export function OrdenesCompra() {
         </p>
       )}
     </div>
+    </VistaAnimada>
   );
 }
 

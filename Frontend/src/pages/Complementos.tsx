@@ -13,6 +13,8 @@ import {
   type FiltrosComplemento,
 } from "../api/complementos";
 import { ArchivoLink } from "../Components/ArchivoLink";
+import { BotonFiltros, Plegable, VistaAnimada } from "../Components/Animaciones";
+import { useSalida } from "../Components/movimiento";
 import { ApiError } from "../api/client";
 import "./Facturas.css";
 
@@ -75,6 +77,8 @@ function ListadoComplementos() {
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [idSeleccionado, setIdSeleccionado] = useState<number | null>(null);
+  const [filtrosAbiertos, setFiltrosAbiertos] = useState(false);
+  const { saliendo, salir } = useSalida();
 
   const [q, setQ] = useState("");
   const [formaPago, setFormaPago] = useState("");
@@ -143,28 +147,45 @@ function ListadoComplementos() {
     }
   }
 
+  const filtrosActivos = [formaPago, fechaDesde, fechaHasta].filter(Boolean).length
+    + (vinculado !== "todos" ? 1 : 0) + (soloAtencion ? 1 : 0) + (incluirCancelados ? 1 : 0);
+
   if (idSeleccionado !== null) {
     return (
-      <ComplementoDetalleView
-        id={idSeleccionado}
-        onVolver={() => {
-          setIdSeleccionado(null);
-          cargar(pagina);
-        }}
-      />
+      <VistaAnimada key={`detalle-${idSeleccionado}`} tipo="detalle" saliendo={saliendo}>
+        <ComplementoDetalleView
+          id={idSeleccionado}
+          onVolver={() =>
+            salir(() => {
+              setIdSeleccionado(null);
+              cargar(pagina);
+            })
+          }
+        />
+      </VistaAnimada>
     );
   }
 
   return (
-    <>
+    <VistaAnimada key="listado" tipo="listado" saliendo={saliendo}>
       <div className="facturas-filtros">
-        <input
-          className="field-input facturas-buscador"
-          placeholder="Buscar por UUID del complemento, folio o UUID de la factura…"
-          value={q}
-          onChange={(e) => setQ(e.target.value)}
-        />
+        <div className="filtros-barra">
+          <input
+            className="field-input facturas-buscador"
+            placeholder="Buscar por UUID del complemento, folio o UUID de la factura…"
+            value={q}
+            onChange={(e) => setQ(e.target.value)}
+          />
+          <BotonFiltros
+            abierto={filtrosAbiertos}
+            activos={filtrosActivos}
+            onClick={() => setFiltrosAbiertos((v) => !v)}
+            controla="filtros-complementos"
+          />
+        </div>
 
+        <Plegable abierto={filtrosAbiertos} id="filtros-complementos">
+        <div className="filtros-plegables">
         <div className="facturas-filtros-grid">
           <input
             className="field-input"
@@ -219,6 +240,8 @@ function ListadoComplementos() {
             Incluir cancelados
           </label>
         </div>
+        </div>
+        </Plegable>
       </div>
 
       {resumen && (
@@ -290,7 +313,7 @@ function ListadoComplementos() {
                 <tr
                   key={c.id}
                   className={`facturas-row${c.cancelado ? " facturas-row-cancelada" : ""}`}
-                  onClick={() => setIdSeleccionado(c.id)}
+                  onClick={() => salir(() => setIdSeleccionado(c.id))}
                 >
                   <td className="facturas-cell-strong">
                     {c.folio ?? uuidCorto(c.uuid_cp)}
@@ -368,7 +391,7 @@ function ListadoComplementos() {
           </div>
         </>
       )}
-    </>
+    </VistaAnimada>
   );
 }
 

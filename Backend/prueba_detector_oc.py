@@ -77,6 +77,26 @@ def casos_de_texto():
     r = cuerpo_es_orden_de_compra("Promociones de septiembre", "Compra hoy y ahorra 2026")
     verificar("correo cualquiera no crea OC", r, None)
 
+    print("== Facturas que NO son OC (15/10/2026)")
+    # Factura F 25265 de DBM Supply (Dibamex): recuadro "ORDEN DE COMPRA:
+    # COT-1984" en el encabezado; entró como OC el 10/10/2026.
+    dibamex = (
+        "FOLIO SAT\n0da1bc66-a87b-492b-831e-dbb4175437f1\nDBM Supply, S. A. de C. V.\n"
+        "Fecha de emisión: 14/09/2026 Fecha de certificación: 14/09/2026 20:02:49\n"
+        "Certificado emisor: 00001000000715478754 Certificado SAT: 00001000000719545303\n"
+        "FACTURADO A: ENTREGA A: ORDEN DE COMPRA:\nMONSORT SIN FRONTERAS COT-1984\n"
+        "Cadena original del complemento de certificación digital del SAT: ||1.1|0da1bc66\n"
+        "Sello digital del SAT: gdsVufC5Pd"
+    )
+    verificar("factura con recuadro 'Orden de compra'",
+              es_documento_oc(dibamex, "f25265.pdf"), False)
+    verificar("nombre 'factura' sin texto de OC",
+              es_documento_oc("ORDEN DE COMPRA 4500\nPO Number 4500", "dbm130724kw5_factura_20260914_f25265.pdf"), False)
+    verificar("OC que pide 'Uso CFDI G03' sigue siendo OC",
+              es_documento_oc("ORDEN DE COMPRA 4500123\nUso CFDI: G03  Régimen fiscal 601", "OC 4500123.pdf"), True)
+    verificar("OC que pide 'incluir folio fiscal' sigue siendo OC",
+              es_documento_oc("PURCHASE ORDER 778812\nFavor de incluir el folio fiscal en su factura", "PO_778812.pdf"), True)
+
 
 def casos_pdf(carpeta: Path):
     verdad = json.loads((carpeta / "verdad.json").read_text(encoding="utf-8"))

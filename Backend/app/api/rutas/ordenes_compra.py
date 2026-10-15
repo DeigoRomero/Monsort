@@ -24,6 +24,7 @@ _COLUMNAS = (
     OrdenesCompra.confianza_oc, OrdenesCompra.nombre_archivo,
     OrdenesCompra.fecha_recepcion, OrdenesCompra.id_cliente,
     OrdenesCompra.monto, OrdenesCompra.moneda,
+    OrdenesCompra.descartada, OrdenesCompra.motivo_descarte,
 )
 
 
@@ -46,7 +47,7 @@ def _listado(db: Session, oc: OrdenesCompra, conteo: int | None = None,
         cliente = db.query(Cliente.nombre).filter(Cliente.id == oc.id_cliente).scalar()
 
     sin_factura_30_dias = False
-    if conteo == 0 and oc.fecha_recepcion:
+    if conteo == 0 and oc.fecha_recepcion and not oc.descartada:
         sin_factura_30_dias = (date.today() - oc.fecha_recepcion.date()).days > 30
 
     return OrdenCompraListado(
@@ -63,10 +64,15 @@ def _listado(db: Session, oc: OrdenesCompra, conteo: int | None = None,
         cliente=cliente,
         monto=oc.monto,
         moneda=oc.moneda,
+        descartada=bool(oc.descartada),
+        motivo_descarte=oc.motivo_descarte,
     )
 
 
 def _aplicar_filtros(consulta, f: FiltrosOrdenCompra):
+    # Facturas, cotizaciones y reenvíos que entraron como OC: fuera de la
+    # vista normal; se consultan aparte para revisarlos o restaurarlos.
+    consulta = consulta.filter(OrdenesCompra.descartada == bool(f.descartadas))
     if f.sin_numero:
         consulta = consulta.filter(OrdenesCompra.numero_oc.is_(None))
     if f.id_cliente:
@@ -176,6 +182,19 @@ def actualizar_orden_compra(
     ).first():
         raise HTTPException(status_code=422, detail="Cliente no encontrado")
 
+    if cambios.get("descartada") is True and not oc.descartada:
+        if db.query(Facturas.id_factura).filter(Facturas.id_orden_compra == oc.id).first():
+            raise HTTPException(
+                status_code=409,
+                detail="Esta OC tiene facturas vinculadas; no se puede descartar.",
+            )
+        cambios["motivo_descarte"] = "Descartada a mano: no es una orden de compra"
+    elif cambios.get("descartada") is False:
+        cambios["motivo_descarte"] = None
+        # Una persona dijo que SÍ es OC: ni el detector de duplicados ni
+        # redetectar_oc la vuelven a descartar ('manual' se respeta).
+        cambios["confianza_oc"] = "manual"
+
     renumerada = "numero_oc" in cambios and cambios["numero_oc"] != oc.numero_oc
     for campo, valor in cambios.items():
         setattr(oc, campo, valor)
@@ -187,6 +206,7 @@ def actualizar_orden_compra(
     db.commit()
     db.refresh(oc)
 
-    if renumerada:
+    # Renumerada o restaurada: puede que ahora sí tenga factura.
+    if renumerada or cambios.get("descartada") is False:
         reconciliar(db)
     return _listado(db, oc)

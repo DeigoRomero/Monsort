@@ -1,3 +1,40 @@
+# Despliegue del 15/10/2026: OCs más estrictas y vinculación diaria
+
+- Un PDF que es una factura timbrada (sello/certificado del SAT, UUID,
+  cadena original) ya no puede entrar como orden de compra, aunque tenga un
+  recuadro "Orden de compra" (factura F 25265 de Dibamex, COT-1984).
+- Las facturas se vinculan con su OC en cualquier estado salvo Cancelada
+  (antes las de Histórico/Revisada nunca se vinculaban).
+- Reenvíos idénticos de una OC (mismo número, monto y cliente) se ocultan.
+- Job diario 6:20 (hora de México) que vincula todo, aunque Gmail esté
+  desconectado.
+- Pantalla de OCs: filtro "Ver descartadas" y botón "No es una orden de compra".
+
+```powershell
+cd D:\ProyectoMonsort
+git status                      # sin .env ni pruebas_oc/
+git add -A
+git commit -m "OCs: veto de facturas CFDI, vinculacion diaria, descartadas"
+git pull --no-rebase origin main
+git push origin main
+```
+
+```bash
+ssh monsort@64.177.80.14
+cd /srv/monsort
+sudo -u postgres pg_dump -Fc MonsortDB > ~/respaldo_$(date +%Y%m%d_%H%M).dump
+./despliegue.sh                 # migración d8b4f1a6c372 (2 columnas, no borra nada)
+
+cd /srv/monsort/ProyectoMonsort/Backend
+../../.venv/bin/python -m app.services.redetectar_oc              # vista previa
+../../.venv/bin/python -m app.services.redetectar_oc --aplicar    # oculta lo que no es OC y vincula
+```
+
+Nada se borra: lo descartado se ve con el filtro "Ver descartadas" y se
+puede restaurar desde el detalle.
+
+---
+
 # Despliegue del 14/10/2026: filtros de órdenes de compra
 
 Cambios: búsqueda por monto en facturas emitidas, filtros en órdenes de

@@ -12,6 +12,7 @@ from app.services.usuario_service import obtener_usuario_sistema, obtener_estado
 from google.auth.exceptions import RefreshError
 from app.core.config import settings
 from sqlalchemy import or_
+from sqlalchemy.orm import load_only
 from decimal import Decimal, InvalidOperation
 import hashlib
 import pdfplumber
@@ -495,10 +496,15 @@ def buscar_pdf_por_uuid(indice: list[dict], uuid_documento: str):
     uuid_limpio = uuid_documento.replace("-", "").lower()
 
     for item in indice:
-        if item["asignado"] or item["es_oc"]:
+        # Ya NO se saltan los PDFs marcados como OC: si el PDF trae el UUID de
+        # esta factura, ES la factura. Antes, una factura con un recuadro
+        # "Orden de compra" en el encabezado se quedaba sin su PDF y el PDF
+        # terminaba en la pantalla de órdenes de compra.
+        if item["asignado"]:
             continue
         if uuid_limpio in item["texto_plano"]:
             item["asignado"] = True
+            item["es_oc"] = False
             return item["contenido"]
 
     return None
@@ -1026,9 +1032,163 @@ def _tiene_cp_activo(db, id_factura: int) -> bool:
 
 # ---------- RECONCILIACIÓN ----------
 
-def reconciliar(db):
+# ═══════════════════════════════════════════════════════════════════════════
+# VÍNCULO FACTURA → OC (15/10/2026)
+#
+# Antes solo se vinculaban facturas en estados NO terminales. Una factura que
+# ya estaba en 'Histórico' o 'Revisada' cuando llegó su OC nunca se
+# vinculaba, y la OC se quedaba en "0 facturas" para siempre (OC 26LAG0200
+# con la factura CL58, 63600796 con FG852 y FG1016...). Vincular es
+# registrar un hecho, igual que los pagos de CP: se hace en cualquier
+# estado salvo 'Cancelada' (una factura cancelada no surte la OC). El ESTADO
+# de las terminales no se toca: eso sigue en el paso 3 de reconciliar().
+#
+# Tampoco se vinculaba nada si dos OCs tenían el mismo número (un reenvío
+# del mismo PDF con otro nombre): la ambigüedad bloqueaba el vínculo. Ahora
+# los reenvíos idénticos se descartan y, entre revisiones distintas de una
+# misma OC, se elige la que coincide en monto.
+# ═══════════════════════════════════════════════════════════════════════════
+
+def _clientes_compatibles(a, b) -> bool:
+    return a is None or b is None or a == b
+
+
+def descartar_ocs_duplicadas(db) -> int:
+    """
+    Reenvíos idénticos de una OC: mismo número (llave), mismo monto, mismo
+    cliente. Se queda la que ya tiene facturas o, si ninguna, la primera que
+    llegó; las demás se marcan descartadas. Nunca toca una OC con facturas
+    ni una que alguien corrigió a mano. Devuelve cuántas descartó.
+    """
+    ocs = db.query(OrdenesCompra).options(load_only(
+        OrdenesCompra.id, OrdenesCompra.numero_oc, OrdenesCompra.id_cliente,
+        OrdenesCompra.monto, OrdenesCompra.fecha_recepcion, OrdenesCompra.confianza_oc,
+        OrdenesCompra.descartada, OrdenesCompra.motivo_descarte,
+    )).filter(
+        OrdenesCompra.descartada == False,              # noqa: E712
+        OrdenesCompra.numero_oc.isnot(None),
+    ).all()
+
+    grupos: dict[tuple, list] = {}
+    for oc in ocs:
+        k = clave_oc(oc.numero_oc)
+        if k:
+            grupos.setdefault((k, oc.monto), []).append(oc)
+
+    descartadas = 0
+    for grupo in grupos.values():
+        if len(grupo) < 2:
+            continue
+        clientes = {oc.id_cliente for oc in grupo if oc.id_cliente is not None}
+        if len(clientes) > 1:
+            continue          # mismo número en clientes distintos: no son la misma OC
+        con_facturas = {
+            fila[0] for fila in db.query(Facturas.id_orden_compra)
+            .filter(Facturas.id_orden_compra.in_([oc.id for oc in grupo])).distinct()
+        }
+        grupo.sort(key=lambda oc: (oc.id not in con_facturas,
+                                   oc.fecha_recepcion or datetime.max, oc.id))
+        conservada = grupo[0]
+        for oc in grupo[1:]:
+            if oc.id in con_facturas or oc.confianza_oc == "manual":
+                continue
+            oc.descartada = True
+            oc.motivo_descarte = f"Reenvío de la OC #{conservada.id} (mismo número y monto)"
+            descartadas += 1
+            logger.info("OC #%s descartada: duplicada de #%s (%s)",
+                        oc.id, conservada.id, oc.numero_oc)
+    if descartadas:
+        db.flush()
+    return descartadas
+
+
+def _elegir_oc(candidatas: list, factura):
+    """
+    Entre varias OCs con el mismo número (revisiones), la que coincide en
+    monto con el importe de la factura; si no, la más reciente. Si los
+    números NO son la misma llave (match por núcleo), solo se acepta una.
+    """
+    if len(candidatas) == 1:
+        return candidatas[0]
+    if len({clave_oc(oc.numero_oc) for oc in candidatas}) > 1:
+        return None
+    if factura.subtotal is not None:
+        mismo_monto = [oc for oc in candidatas if oc.monto == factura.subtotal]
+        if len(mismo_monto) == 1:
+            return mismo_monto[0]
+    return max(candidatas, key=lambda oc: (oc.fecha_recepcion or datetime.min, oc.id))
+
+
+def vincular_facturas_con_oc(db) -> int:
+    """
+    Vincula cada factura (con número de OC y sin OC enlazada) con su OC.
+    Idempotente: lo corren cada ciclo de Gmail y el job diario. Devuelve
+    cuántas facturas vinculó.
+
+    Comparación por LLAVE normalizada (detector_oc.clave_oc), no por texto
+    exacto: "BOS-507-91753." y "BOS-507-91753", o "#PO-VSM-12062" y
+    "PO-VSM-12062", son la misma orden. Si la llave no encuentra nada se
+    intenta por el núcleo numérico ("C-10003766965" vs "10003766965"),
+    solo con UNA candidata. Nunca entre clientes distintos.
+    """
+    estado_cancelada = obtener_estado(db, "Cancelada")
+    consulta = db.query(Facturas).options(load_only(
+        Facturas.id_factura, Facturas.numero_oc, Facturas.id_cliente,
+        Facturas.subtotal, Facturas.id_orden_compra, Facturas.folio_interno,
+    )).filter(
+        Facturas.id_orden_compra.is_(None),
+        Facturas.numero_oc.isnot(None),
+    )
+    if estado_cancelada:
+        consulta = consulta.filter(Facturas.id_estado != estado_cancelada.id_estado)
+    facturas_sin_oc = consulta.all()
+    if not facturas_sin_oc:
+        return 0
+
+    por_llave: dict[str, list] = {}
+    por_nucleo: dict[str, list] = {}
+    for oc in db.query(
+        OrdenesCompra.id, OrdenesCompra.numero_oc, OrdenesCompra.id_cliente,
+        OrdenesCompra.monto, OrdenesCompra.fecha_recepcion,
+    ).filter(
+        OrdenesCompra.numero_oc.isnot(None),
+        OrdenesCompra.descartada == False,              # noqa: E712
+    ).all():
+        k = clave_oc(oc.numero_oc)
+        if k:
+            por_llave.setdefault(k, []).append(oc)
+        n = nucleo_numerico(oc.numero_oc)
+        if n and len(n) >= 5:
+            por_nucleo.setdefault(n, []).append(oc)
+
+    vinculadas = 0
+    for factura in facturas_sin_oc:
+        candidatas = [
+            oc for oc in por_llave.get(clave_oc(factura.numero_oc) or "", [])
+            if _clientes_compatibles(oc.id_cliente, factura.id_cliente)
+        ]
+        if not candidatas:
+            n = nucleo_numerico(factura.numero_oc)
+            if n and len(n) >= 5:
+                candidatas = [
+                    oc for oc in por_nucleo.get(n, [])
+                    if _clientes_compatibles(oc.id_cliente, factura.id_cliente)
+                ]
+        elegida = _elegir_oc(candidatas, factura) if candidatas else None
+        if elegida:
+            factura.id_orden_compra = elegida.id
+            vinculadas += 1
+            logger.info("Factura %s vinculada a la OC #%s (%s)",
+                        factura.folio_interno, elegida.id, elegida.numero_oc)
+    if vinculadas:
+        db.flush()
+    return vinculadas
+
+
+def reconciliar(db) -> dict:
     """
     Enlaza OCs con facturas y CPs con facturas. Idempotente.
+    Devuelve {"vinculadas": n, "duplicadas": m} del paso de OCs.
 
     Distingue tres cosas que antes iban detras del mismo filtro de estados
     terminales, y esa mezcla escondia pagos:
@@ -1081,44 +1241,10 @@ def reconciliar(db):
     db.flush()
 
     # --- 2. Enlazar facturas con su OC ---
-    facturas_sin_oc = db.query(Facturas).filter(
-        Facturas.id_orden_compra.is_(None),
-        Facturas.numero_oc.isnot(None),
-        Facturas.id_estado.notin_(ids_terminales)
-    ).all()
-
-    # Comparación por LLAVE normalizada (detector_oc.clave_oc), no por texto
-    # exacto: "BOS-507-91753." en la factura y "BOS-507-91753" en la OC, o
-    # "#PO-VSM-12062" y "PO-VSM-12062", son la misma orden. Si la llave no
-    # encuentra nada, se intenta por el núcleo numérico ("C-10003766965" vs
-    # "10003766965"), pero solo si hay UNA candidata del mismo cliente:
-    # ante ambigüedad no se vincula.
-    if facturas_sin_oc:
-        por_llave: dict[str, list] = {}
-        por_nucleo: dict[str, list] = {}
-        for oc in db.query(
-            OrdenesCompra.id, OrdenesCompra.numero_oc, OrdenesCompra.id_cliente
-        ).filter(OrdenesCompra.numero_oc.isnot(None)).all():
-            k = clave_oc(oc.numero_oc)
-            if k:
-                por_llave.setdefault(k, []).append(oc)
-            n = nucleo_numerico(oc.numero_oc)
-            if n and len(n) >= 5:
-                por_nucleo.setdefault(n, []).append(oc)
-
-        for factura in facturas_sin_oc:
-            candidatas = por_llave.get(clave_oc(factura.numero_oc) or "", [])
-            if not candidatas:
-                n = nucleo_numerico(factura.numero_oc)
-                if n and len(n) >= 5:
-                    candidatas = [
-                        oc for oc in por_nucleo.get(n, [])
-                        if oc.id_cliente in (None, factura.id_cliente)
-                    ]
-            if len(candidatas) == 1:
-                factura.id_orden_compra = candidatas[0].id
-
-    db.flush()
+    resumen = {
+        "duplicadas": descartar_ocs_duplicadas(db),
+        "vinculadas": vincular_facturas_con_oc(db),
+    }
 
     # Cliente de la OC desde su factura, cuando el PDF no lo dejó claro.
     # La factura es la fuente más confiable: su RFC receptor viene del XML.
@@ -1188,6 +1314,7 @@ def reconciliar(db):
             factura.id_estado = estado_captura.id_estado
 
     db.commit()
+    return resumen
 
 
 # ---------- REVISIÓN MANUAL ----------

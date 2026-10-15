@@ -22,8 +22,10 @@ Reglas al aplicar:
     se reemplaza por el nuevo.
   - Si el usuario SÍ lo corrigió a mano, se respeta su valor; solo se anota
     la detección nueva en numero_oc_detectado y confianza_oc = 'manual'.
-  - Los PDFs que el detector ya no considera OC (cotizaciones, recibos) solo
-    se LISTAN para revisión; no se borra nada.
+  - Los PDFs que no son OC (facturas timbradas, cotizaciones, recibos) se
+    marcan DESCARTADOS (15/10/2026): desaparecen de la pantalla pero no se
+    borran, y se pueden restaurar desde el filtro "Descartadas". Se respetan
+    los que ya tienen facturas vinculadas o se capturaron a mano.
   - Los vínculos factura→OC existentes no se tocan (van por id). Al final
     se corre reconciliar() para enlazar lo que ahora sí coincide.
 """
@@ -40,7 +42,7 @@ from sqlalchemy.orm import load_only
 from app.BaseDeDatos import SessionLocal
 from app.modelos.correo_procesado import CorreosProcesados
 from app.modelos.orden_compra import OrdenesCompra
-from app.services.detector_oc import detectar_numero_oc, es_documento_oc
+from app.services.detector_oc import detectar_numero_oc, es_documento_oc, motivo_no_es_oc
 
 logger = logging.getLogger(__name__)
 
@@ -71,7 +73,11 @@ def redetectar_existentes(db, aplicar: bool) -> dict:
 
     resumen = {"revisadas": 0, "cambian": 0, "respetadas": 0, "no_parecen_oc": 0, "iguales": 0,
                "monto_nuevo": 0, "cliente_nuevo": 0}
-    ocs = db.query(OrdenesCompra).order_by(OrdenesCompra.id).all()
+    from app.modelos.factura import Facturas
+
+    ocs = db.query(OrdenesCompra).filter(
+        OrdenesCompra.descartada == False             # noqa: E712
+    ).order_by(OrdenesCompra.id).all()
     print(f"{'id':>5}  {'actual':<18} {'nuevo':<18} {'conf.':<8} archivo")
     for oc in ocs:
         if not oc.archivo:
@@ -84,7 +90,15 @@ def redetectar_existentes(db, aplicar: bool) -> dict:
 
         if not es_documento_oc(texto, oc.nombre_archivo):
             resumen["no_parecen_oc"] += 1
-            print(f"{oc.id:>5}  {str(oc.numero_oc):<18} {'(no parece OC)':<18} {'':<8} {oc.nombre_archivo}")
+            motivo = motivo_no_es_oc(texto, oc.nombre_archivo)
+            tiene_facturas = db.query(Facturas.id_factura).filter(
+                Facturas.id_orden_compra == oc.id).first() is not None
+            respetar = tiene_facturas or oc.confianza_oc == "manual"
+            print(f"{oc.id:>5}  {str(oc.numero_oc):<18} {'(no es OC)':<18} {'':<8} {oc.nombre_archivo}"
+                  f"\n       {motivo}" + ("  <- tiene facturas o se capturó a mano: se deja" if respetar else ""))
+            if aplicar and not respetar:
+                oc.descartada = True
+                oc.motivo_descarte = motivo
             continue
 
         _completar_datos_comerciales(db, oc, texto, aplicar, resumen)

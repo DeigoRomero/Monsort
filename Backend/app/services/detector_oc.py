@@ -523,11 +523,65 @@ _RE_NOMBRE_NO_OC = re.compile(
     r"TERMS|CONDICIONES|CATALOG", re.I)
 
 
+# Marcas que solo trae una FACTURA timbrada (la representación impresa de un
+# CFDI). Una orden de compra nunca lleva sello ni certificado del SAT: se
+# emite antes de que exista la factura. Agrupadas por familia para que
+# "Sello digital del SAT" y "Sello SAT" no cuenten doble.
+_MARCAS_CFDI = {
+    "sello_sat": re.compile(r"SELLO\s+(?:DIGITAL\s+)?(?:DEL\s+)?SAT\b"),
+    "cadena_original": re.compile(r"CADENA\s+ORIGINAL"),
+    "certificado_sat": re.compile(r"CERTIFICADO\s+(?:DEL\s+)?SAT\b|NO\.?\s*(?:DE\s+)?SERIE\s+DEL?\s+CERTIFICADO\s+DEL\s+SAT"),
+    "fecha_certificacion": re.compile(r"FECHA\s+(?:Y\s+HORA\s+)?DE\s+CERTIFICACION|FECHA\s+DE\s+TIMBRADO"),
+    "folio_fiscal": re.compile(r"FOLIO\s+FISCAL|FOLIO\s+SAT\b"),
+    "timbre": re.compile(r"TIMBRE\s+FISCAL|REPRESENTACION\s+IMPRESA\s+DE\s+UN\s+CFDI"),
+    # pdfplumber a veces parte el UUID en dos renglones: también cuenta la etiqueta.
+    "uuid": re.compile(r"\b[0-9A-F]{8}-[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{12}\b|\bUUID\b"),
+}
+
+
+def marcas_cfdi(texto: str | None) -> list[str]:
+    """Familias de marcas de factura timbrada presentes en el texto."""
+    t = _sin_acentos(texto or "")
+    return [nombre for nombre, patron in _MARCAS_CFDI.items() if patron.search(t)]
+
+
+def parece_cfdi(texto: str | None) -> bool:
+    """
+    ¿Es la representación impresa de una factura (CFDI)?
+
+    Con DOS familias basta: el 10/10/2026 entró como OC la factura F 25265 de
+    DBM Supply (Dibamex) porque su encabezado tiene un recuadro "ORDEN DE
+    COMPRA: COT-1984". Esa factura trae folio SAT, UUID, certificado SAT,
+    fecha de certificación, sello y cadena original: seis de siete.
+    """
+    return len(marcas_cfdi(texto)) >= 2
+
+
+def motivo_no_es_oc(texto: str | None, nombre_archivo: str | None = None) -> str:
+    """Texto corto para la pantalla de por qué un PDF se descartó como OC."""
+    if parece_cfdi(texto):
+        return "Es una factura (CFDI), no una orden de compra"
+    nombre = _sin_acentos(nombre_archivo or "")
+    cabeza = _sin_acentos(texto or "")[:600]
+    if re.search(r"COTIZACI|QUOTE|PROPOSAL|PROPUESTA", nombre + " " + cabeza):
+        return "Es una cotización, no una orden de compra"
+    if re.search(r"RECEIPT|RECIBO", nombre + " " + cabeza):
+        return "Es un recibo, no una orden de compra"
+    return "No parece una orden de compra"
+
+
 def es_documento_oc(texto: str | None, nombre_archivo: str | None = None,
                     asunto: str | None = None) -> bool:
     """
     Decide si un PDF es una orden de compra.
 
+    Vetos (14/10/2026), antes que cualquier otra señal:
+    - El PDF es una factura timbrada (parece_cfdi): sello/certificado del
+      SAT, UUID, cadena original... Una OC nunca los trae.
+    - El NOMBRE del archivo dice factura/invoice/cotización/recibo y no
+      empieza como OC ("dbm130724kw5_factura_20260914_f25265.pdf").
+
+    Luego:
     - Encabezado con "Purchase Order"/"Orden de compra"/"PO Number" -> sí,
       salvo que el MISMO encabezado diga antes "Cotización", "Quote",
       "Receipt"... (la cotización de Termic dice "favor de enviar su PO").
@@ -535,6 +589,10 @@ def es_documento_oc(texto: str | None, nombre_archivo: str | None = None,
     """
     cabeza = _sin_acentos(texto or "")[:600]
     nombre = _sin_acentos(nombre_archivo or "")
+    if parece_cfdi(texto):
+        return False
+    if _RE_NOMBRE_NO_OC.search(nombre) and not _RE_NOMBRE_OC.search(nombre):
+        return False
     if cabeza.strip():
         si = _RE_SENAL_OC.search(cabeza)
         no = _RE_SENAL_NO_OC.search(cabeza)

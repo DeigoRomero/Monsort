@@ -33,7 +33,8 @@ def obtener_cliente(id_cliente: int, db: Session = Depends(get_db)):
     ).count()
 
     total_ordenes = db.query(OrdenesCompra).filter(
-        OrdenesCompra.id_cliente == id_cliente
+        OrdenesCompra.id_cliente == id_cliente,
+        OrdenesCompra.descartada == False,              # noqa: E712
     ).count()
 
     return ClienteDetalle(

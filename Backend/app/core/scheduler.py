@@ -62,6 +62,41 @@ def job_reprocesar_fallidos():
         db.close()
 
 
+def job_vincular_ocs():
+    """
+    Una vez al día: vincula TODAS las facturas con su OC, sin depender de
+    Gmail. reconciliar() también corre al final de cada revisión de correo,
+    pero esa revisión se corta antes si Gmail está desconectado (como del
+    29/09 al 14/10/2026) y entonces nada se vinculaba.
+    """
+    from app.services.factura_service import reconciliar
+    from app.services.notificacion_service import crear
+
+    db = SessionLocal()
+    try:
+        resumen = reconciliar(db) or {}
+        vinculadas = resumen.get("vinculadas", 0)
+        duplicadas = resumen.get("duplicadas", 0)
+        logger.info("Vinculación diaria: %d factura(s) vinculadas, %d OC(s) duplicadas",
+                    vinculadas, duplicadas)
+        if vinculadas or duplicadas:
+            partes = []
+            if vinculadas:
+                partes.append(f"{vinculadas} factura{'s' if vinculadas != 1 else ''} "
+                              f"vinculada{'s' if vinculadas != 1 else ''} a su orden de compra")
+            if duplicadas:
+                partes.append(f"{duplicadas} OC{'s' if duplicadas != 1 else ''} "
+                              f"duplicada{'s' if duplicadas != 1 else ''} ocultada{'s' if duplicadas != 1 else ''}")
+            crear(db, tipo="vinculacion", nivel="info", seccion="ordenes",
+                  titulo="Vinculación diaria: " + ", ".join(partes))
+            db.commit()
+    except Exception:
+        db.rollback()
+        logger.exception("Error en la vinculación diaria de OCs")
+    finally:
+        db.close()
+
+
 def job_verificar_sat():
     """Verifica un lote de facturas ante el SAT y sincroniza cancelaciones."""
     db = SessionLocal()
@@ -216,6 +251,19 @@ scheduler.add_job(
     max_instances=1,
     coalesce=True,
     misfire_grace_time=3600,
+)
+
+# 6:20 de la mañana (México), antes de que alguien abra la pantalla.
+scheduler.add_job(
+    job_vincular_ocs,
+    "cron",
+    hour=6,
+    minute=20,
+    timezone=ZONA_MEXICO,
+    id="vincular_ocs",
+    max_instances=1,
+    coalesce=True,
+    misfire_grace_time=6 * 3600,
 )
 
 scheduler.add_job(

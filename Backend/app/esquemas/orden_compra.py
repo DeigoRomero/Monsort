@@ -22,6 +22,8 @@ class OrdenCompraListado(BaseModel):
     # Antes de IVA cuando la OC lo desglosa; si no, el total del documento.
     monto: Decimal | None = None
     moneda: str | None = None
+    descartada: bool = False
+    motivo_descarte: str | None = None
 
 
 class FiltrosOrdenCompra(BaseModel):
@@ -34,6 +36,8 @@ class FiltrosOrdenCompra(BaseModel):
     monto_max: Decimal | None = Field(None, ge=0)
     con_factura: bool | None = None
     sin_numero: bool | None = None
+    # False/None: solo las vigentes. True: solo las descartadas.
+    descartadas: bool | None = None
 
 
 class OrdenCompraActualizar(BaseModel):
@@ -42,12 +46,21 @@ class OrdenCompraActualizar(BaseModel):
     id_cliente: int | None = None
     monto: Decimal | None = Field(None, ge=0, max_digits=14, decimal_places=2)
     moneda: str | None = None
+    # True: "no es una orden de compra" (se oculta). False: restaurar.
+    descartada: bool | None = None
 
     @model_validator(mode="after")
     def _algo_que_cambiar(self):
         if not self.model_fields_set:
             raise ValueError("No hay cambios que guardar")
         return self
+
+    @field_validator("descartada")
+    @classmethod
+    def _validar_descartada(cls, v: bool | None) -> bool:
+        if v is None:
+            raise ValueError("Indica true o false")
+        return v
 
     @field_validator("moneda")
     @classmethod

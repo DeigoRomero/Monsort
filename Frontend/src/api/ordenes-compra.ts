@@ -16,6 +16,9 @@ export interface OrdenCompra {
   /** Antes de IVA cuando la OC lo desglosa; si no, el total. Decimal como texto. */
   monto: string | null;
   moneda: string | null;
+  /** Factura, cotización o reenvío que entró como OC: oculta del listado normal. */
+  descartada: boolean;
+  motivo_descarte: string | null;
 }
 
 export interface OrdenCompraActualizar {
@@ -23,6 +26,7 @@ export interface OrdenCompraActualizar {
   id_cliente?: number | null;
   monto?: string | null;
   moneda?: string | null;
+  descartada?: boolean;
 }
 
 export interface FiltrosOrdenCompra {
@@ -33,6 +37,8 @@ export interface FiltrosOrdenCompra {
   monto_min?: string;
   monto_max?: string;
   con_factura?: boolean;
+  /** true: solo las descartadas. */
+  descartadas?: boolean;
 }
 
 export function listarOrdenes(filtros: FiltrosOrdenCompra = {}): Promise<OrdenCompra[]> {

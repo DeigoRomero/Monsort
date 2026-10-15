@@ -508,7 +508,10 @@ def obtener_ocs_candidatas(id_factura: int, db: Session = Depends(get_db)):
     todas = db.query(OrdenesCompra).options(load_only(
         OrdenesCompra.id, OrdenesCompra.numero_oc, OrdenesCompra.numero_oc_detectado,
         OrdenesCompra.confianza_oc, OrdenesCompra.nombre_archivo, OrdenesCompra.fecha_recepcion,
-    )).filter(OrdenesCompra.numero_oc.isnot(None)).all()
+    )).filter(
+        OrdenesCompra.numero_oc.isnot(None),
+        OrdenesCompra.descartada == False,              # noqa: E712
+    ).all()
     ocs = [oc for oc in todas if clave_oc(oc.numero_oc) == llave]
     if not ocs and nucleo and len(nucleo) >= 5:
         ocs = [oc for oc in todas if nucleo_numerico(oc.numero_oc) == nucleo]

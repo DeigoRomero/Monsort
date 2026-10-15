@@ -72,6 +72,7 @@ export function OrdenesCompra() {
   const [montoMin, setMontoMin] = useState("");
   const [montoMax, setMontoMax] = useState("");
   const [conFactura, setConFactura] = useState<"todos" | "true" | "false">("todos");
+  const [verDescartadas, setVerDescartadas] = useState(false);
 
   // Al escribir rápido salen varias peticiones; solo cuenta la última.
   const ultimaPeticion = useRef(0);
@@ -95,6 +96,7 @@ export function OrdenesCompra() {
       monto_min: montoMin ? limpiarMonto(montoMin) ?? undefined : undefined,
       monto_max: montoMax ? limpiarMonto(montoMax) ?? undefined : undefined,
       con_factura: conFactura === "todos" ? undefined : conFactura === "true",
+      descartadas: verDescartadas || undefined,
     };
   }
 
@@ -120,11 +122,11 @@ export function OrdenesCompra() {
     const id = setTimeout(cargar, 400);
     return () => clearTimeout(id);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [q, idCliente, fechaDesde, fechaHasta, montoMin, montoMax, conFactura]);
+  }, [q, idCliente, fechaDesde, fechaHasta, montoMin, montoMax, conFactura, verDescartadas]);
 
   const filtrosActivos =
     [idCliente, fechaDesde, fechaHasta, montoMin, montoMax].filter(Boolean).length +
-    (conFactura !== "todos" ? 1 : 0);
+    (conFactura !== "todos" ? 1 : 0) + (verDescartadas ? 1 : 0);
 
   function limpiarFiltros() {
     setIdCliente("");
@@ -133,6 +135,7 @@ export function OrdenesCompra() {
     setMontoMin("");
     setMontoMax("");
     setConFactura("todos");
+    setVerDescartadas(false);
   }
 
   if (seleccionada) {
@@ -143,8 +146,11 @@ export function OrdenesCompra() {
         clientes={clientes}
         onVolver={() => salir(() => setSeleccionada(null))}
         onGuardado={(actualizada) => {
+          // Descartada o restaurada: cambia de lista, así que sale de esta.
           setOrdenes((prev) =>
-            prev.map((o) => (o.id === actualizada.id ? actualizada : o))
+            actualizada.descartada !== verDescartadas
+              ? prev.filter((o) => o.id !== actualizada.id)
+              : prev.map((o) => (o.id === actualizada.id ? actualizada : o))
           );
           setSeleccionada(actualizada);
         }}
@@ -267,6 +273,17 @@ export function OrdenesCompra() {
               onChange={(e) => MONTO_PERMITIDO.test(e.target.value) && setMontoMax(e.target.value)}
             />
           </div>
+          <label
+            className="facturas-checkbox facturas-checkbox-inline"
+            title="Facturas, cotizaciones o reenvíos que entraron como orden de compra"
+          >
+            <input
+              type="checkbox"
+              checked={verDescartadas}
+              onChange={(e) => setVerDescartadas(e.target.checked)}
+            />
+            Ver descartadas
+          </label>
           {filtrosActivos > 0 && (
             <button type="button" className="factura-btn-secondary" onClick={limpiarFiltros}>
               Limpiar filtros
@@ -320,7 +337,15 @@ export function OrdenesCompra() {
                 </td>
                 <td className="facturas-cell-mono">{o.facturas_asociadas}</td>
                 <td>
-                  {o.sin_factura_30_dias ? (
+                  {o.descartada ? (
+                    <span
+                      className="factura-badge"
+                      style={{ background: "#eef0f4", color: "#5b6478" }}
+                      title={o.motivo_descarte ?? undefined}
+                    >
+                      Descartada
+                    </span>
+                  ) : o.sin_factura_30_dias ? (
                     <span
                       className="factura-badge"
                       style={{ background: "#fbe7e7", color: "#a33b3b" }}
@@ -344,7 +369,9 @@ export function OrdenesCompra() {
 
       {!isLoading && !error && ordenes.length === 0 && (
         <p className="facturas-status">
-          {hayFiltros
+          {verDescartadas && !q.trim() && filtrosActivos === 1
+            ? "No hay documentos descartados."
+            : hayFiltros
             ? "No hay órdenes que coincidan con la búsqueda."
             : "No hay órdenes de compra registradas."}
         </p>
@@ -372,6 +399,24 @@ function DetalleOC({
   const [isSaving, setIsSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [guardadoOk, setGuardadoOk] = useState(false);
+
+  const [confirmarDescarte, setConfirmarDescarte] = useState(false);
+
+  async function cambiarDescarte(descartada: boolean) {
+    setIsSaving(true);
+    setError(null);
+    setGuardadoOk(false);
+    try {
+      const actualizada = await actualizarOrden(oc.id, { descartada });
+      setConfirmarDescarte(false);
+      onGuardado(actualizada);
+      setGuardadoOk(true);
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : "No se pudo guardar la orden.");
+    } finally {
+      setIsSaving(false);
+    }
+  }
 
   async function handleGuardar() {
     setError(null);
@@ -432,7 +477,12 @@ function DetalleOC({
         </span>
         <span className="factura-detalle-divider">|</span>
         <h2 className="factura-detalle-title">OC {oc.numero_oc ?? "sin número"}</h2>
-        <ConfianzaBadge confianza={oc.confianza_oc} numero={oc.numero_oc} />
+        {!oc.descartada && <ConfianzaBadge confianza={oc.confianza_oc} numero={oc.numero_oc} />}
+        {oc.descartada && (
+          <span className="factura-badge" style={{ background: "#eef0f4", color: "#5b6478", marginLeft: 8 }}>
+            Descartada
+          </span>
+        )}
         {oc.sin_factura_30_dias && (
           <span
             className="factura-badge"
@@ -446,6 +496,12 @@ function DetalleOC({
           </span>
         )}
       </div>
+
+      {oc.descartada && (
+        <p className="facturas-status" style={{ margin: "16px 24px 0", padding: 0, color: "#5b6478" }}>
+          {oc.motivo_descarte ?? "Descartada"}. No aparece en la lista de órdenes de compra.
+        </p>
+      )}
 
       <div className="factura-detalle-grid">
         <div className="factura-campo">
@@ -561,6 +617,38 @@ function DetalleOC({
       )}
 
       <div className="factura-detalle-actions">
+        {oc.descartada ? (
+          <button
+            className="factura-btn-secondary"
+            style={{ marginRight: "auto" }}
+            onClick={() => cambiarDescarte(false)}
+            disabled={isSaving}
+          >
+            Restaurar como orden de compra
+          </button>
+        ) : confirmarDescarte ? (
+          <span style={{ marginRight: "auto", display: "flex", gap: 8, alignItems: "center" }}>
+            <span className="facturas-cell-muted">¿Ocultar este documento de las órdenes de compra?</span>
+            <button className="factura-btn-primary" onClick={() => cambiarDescarte(true)} disabled={isSaving}>
+              Sí, no es una OC
+            </button>
+            <button className="factura-btn-secondary" onClick={() => setConfirmarDescarte(false)}>
+              No
+            </button>
+          </span>
+        ) : (
+          <button
+            className="factura-btn-secondary"
+            style={{ marginRight: "auto" }}
+            onClick={() => setConfirmarDescarte(true)}
+            disabled={isSaving || oc.facturas_asociadas > 0}
+            title={oc.facturas_asociadas > 0
+              ? "Tiene facturas vinculadas: es una orden de compra real."
+              : "Para facturas, cotizaciones o recibos que entraron como OC."}
+          >
+            No es una orden de compra
+          </button>
+        )}
         <button className="factura-btn-secondary" onClick={onVolver}>
           Cancelar
         </button>

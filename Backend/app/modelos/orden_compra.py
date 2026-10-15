@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, Numeric, String, DateTime, LargeBinary, ForeignKey
+from sqlalchemy import Boolean, Column, Integer, Numeric, String, DateTime, LargeBinary, ForeignKey, text
 from sqlalchemy.orm import relationship
 from ..BaseDeDatos import Base
 from datetime import datetime
@@ -30,6 +30,13 @@ class OrdenesCompra(Base):
     # total). Lo llena detector_oc.detectar_monto_oc; editable a mano.
     monto = Column(Numeric(14, 2), nullable=True)
     moneda = Column(String(3), nullable=True)            # MXN | USD
+
+    # Documentos que entraron como OC y no lo son (facturas, cotizaciones,
+    # recibos) o reenvíos idénticos de otra OC. No se borran: el hash del
+    # archivo sigue registrado y así no vuelven a entrar en un backfill.
+    # La pantalla los oculta; se pueden ver y restaurar con un filtro.
+    descartada = Column(Boolean, nullable=False, default=False, server_default=text("false"))
+    motivo_descarte = Column(String(120), nullable=True)
     origen = Column(String(20 ), nullable=False, server_default="gmail")
     
     # Relación inversa: facturas asociadas a esta OC

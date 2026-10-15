@@ -122,6 +122,37 @@ try:
             "numero_oc null -> 422")
     afirmar(c.patch(f"/ordenes-compra/{oc['id']}", json={"id_cliente": 999999}).status_code == 422,
             "cliente inexistente -> 422")
+
+    # Descartadas (15/10/2026)
+    afirmar(not any(o["descartada"] for o in todas), "el listado normal no trae descartadas")
+    desc = listar(descartadas="true")
+    afirmar(all(o["descartada"] and o["motivo_descarte"] for o in desc),
+            f"descartadas=true: {len(desc)} con su motivo")
+    afirmar(not any(o["sin_factura_30_dias"] for o in desc), "una descartada no alerta +30 días")
+    con_fact = next((o for o in todas if o["facturas_asociadas"] > 0), None)
+    if con_fact:
+        afirmar(c.patch(f"/ordenes-compra/{con_fact['id']}", json={"descartada": True}).status_code == 409,
+                "no se descarta una OC con facturas -> 409")
+    libre = next((o for o in todas if o["facturas_asociadas"] == 0), None)
+    if libre:
+        r = c.patch(f"/ordenes-compra/{libre['id']}", json={"descartada": True})
+        afirmar(r.status_code == 200 and r.json()["descartada"] and r.json()["motivo_descarte"],
+                "descartar a mano")
+        afirmar(all(o["id"] != libre["id"] for o in listar()), "ya no sale en el listado")
+        r = c.patch(f"/ordenes-compra/{libre['id']}", json={"descartada": False})
+        afirmar(r.status_code == 200 and not r.json()["descartada"]
+                and r.json()["confianza_oc"] == "manual", "restaurar la deja como confirmada a mano")
+    afirmar(c.patch(f"/ordenes-compra/{oc['id']}", json={"descartada": None}).status_code == 422,
+            "descartada null -> 422")
+
+    # Vinculación (15/10/2026): después de reconciliar no queda nada pendiente
+    from app.services.factura_service import (
+        descartar_ocs_duplicadas, reconciliar, vincular_facturas_con_oc,
+    )
+    resumen = reconciliar(db)
+    afirmar(isinstance(resumen, dict) and "vinculadas" in resumen, f"reconciliar devuelve resumen {resumen}")
+    afirmar(vincular_facturas_con_oc(db) == 0 and descartar_ocs_duplicadas(db) == 0,
+            "segunda pasada: 0 vínculos y 0 duplicadas nuevas (idempotente)")
 finally:
     db.close()
     transaccion.rollback()

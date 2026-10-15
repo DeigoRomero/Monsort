@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, String, DateTime, LargeBinary, ForeignKey
+from sqlalchemy import Column, Integer, Numeric, String, DateTime, LargeBinary, ForeignKey
 from sqlalchemy.orm import relationship
 from ..BaseDeDatos import Base
 from datetime import datetime
@@ -25,6 +25,11 @@ class OrdenesCompra(Base):
     hash_archivo = Column(String(64), unique=True, nullable=True)
 
     id_cliente = Column(Integer, ForeignKey("Clientes.id"), nullable=True, index=True)
+
+    # Monto de la OC ANTES de IVA cuando el documento lo desglosa (si no, el
+    # total). Lo llena detector_oc.detectar_monto_oc; editable a mano.
+    monto = Column(Numeric(14, 2), nullable=True)
+    moneda = Column(String(3), nullable=True)            # MXN | USD
     origen = Column(String(20 ), nullable=False, server_default="gmail")
     
     # Relación inversa: facturas asociadas a esta OC

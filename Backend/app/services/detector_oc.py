@@ -625,3 +625,136 @@ def cuerpo_es_orden_de_compra(asunto: str | None, cuerpo: str | None,
     if clave_oc(r.numero) not in re.sub(r"[^A-Z0-9]", "", c):
         return None
     return r
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# MONTO, MONEDA Y CLIENTE DE LA OC (14/10/2026)
+#
+# Para filtrar la pantalla de órdenes de compra por monto y cliente. Igual
+# que el número: etiquetas conocidas, de la más confiable a la más genérica.
+# El monto que se guarda es el de ANTES de IVA cuando la OC lo desglosa,
+# para que se compare con el importe de las facturas (así se suma el
+# "total facturado").
+# ═══════════════════════════════════════════════════════════════════════════
+
+# (patrón de etiqueta, es_subtotal). Se prueban en orden; gana la primera
+# etiqueta que aparezca con un monto válido después.
+_ETIQUETAS_MONTO = [
+    (r"TOTAL\s+PO\s+AMOUNT", True),                       # Hyson
+    (r"VALOR\s+NETO\s+TOTAL\s+SIN\s+IVA", True),           # Devicor (formato 1.234,56)
+    (r"TOTAL\s+NET\s+BEFORE\s+TAXES\s*/\s*SUBTOTAL", True),  # Smurfit
+    (r"IMPORTE\s+TOTAL\s+DE\s+(?:LA\s+)?OC", True),        # CBRE
+    (r"SUB\s*-?\s*TOTAL", True),                           # Parker, Westfall, Labomex, Monsort
+    (r"(?m)^\s*\d+\s+UNITS?(?=\s+[\d$])", True),           # Jabil: "2 Units 37,000.00 MXN"
+    (r"TOTAL\s+(?:ORDER\s+)?AMOUNT", False),
+    (r"GRAND\s+TOTAL(?:\s+IN\s+[A-Z]{3})?", False),
+    (r"(?<![A-Z])TOTAL(?!\s*(?:PRICE|ITEM))", False),      # genérico, al final
+]
+_RE_CANTIDAD = re.compile(
+    r"^[\s:$()A-Z]{0,12}?(\d[\d.,]*(?:\s\d{1,3})*[.,]\d{2})(?!\d)"
+)
+_RE_MONEDA = re.compile(
+    r"\b(USD|US\s+DOLLARS?|D[OÓ]LARES|DLLS?|MXN|MXP|M\.N\.|PESOS)\b", re.I
+)
+# Líneas que dicen "total" pero no son el total de la OC
+_RE_TOTAL_FALSO = re.compile(r"SCHEDULE\s+TOTAL|ITEM\s+TOTAL|PRECIO\s+TOTAL|TOTAL\s+PRICE")
+
+
+def _a_decimal_monto(texto: str):
+    from decimal import Decimal, InvalidOperation
+    t = re.sub(r"(?<=\d)\s(?=\d)", "", texto.strip())      # "7 50.00" -> "750.00"
+    if re.fullmatch(r"\d{1,3}(\.\d{3})+,\d{2}", t):        # 54.432,00 (europeo)
+        t = t.replace(".", "").replace(",", ".")
+    else:
+        t = t.replace(",", "")
+    try:
+        valor = Decimal(t)
+    except InvalidOperation:
+        return None
+    return valor if valor > 0 else None
+
+
+def _moneda(texto: str | None) -> str | None:
+    if not texto:
+        return None
+    m = _RE_MONEDA.search(texto)
+    if not m:
+        return None
+    t = _sin_acentos(m.group(1))
+    return "USD" if t.startswith(("USD", "US", "DOL", "DLL")) else "MXN"
+
+
+def detectar_monto_oc(texto: str | None):
+    """
+    (monto, moneda) de una OC, o (None, None). Monto sin IVA cuando la OC
+    trae subtotal; si solo trae total, el total.
+    """
+    if not texto:
+        return None, None
+    t = _sin_acentos(texto)
+    for patron, _es_subtotal in _ETIQUETAS_MONTO:
+        for m in re.finditer(patron, t):
+            renglon_ini = t.rfind("\n", 0, m.start()) + 1
+            renglon_fin = t.find("\n", m.end())
+            renglon = t[renglon_ini: renglon_fin if renglon_fin != -1 else len(t)]
+            if _RE_TOTAL_FALSO.search(renglon):
+                continue
+            despues = t[m.end(): m.end() + 40]
+            c = _RE_CANTIDAD.match(despues)
+            if not c:
+                continue
+            valor = _a_decimal_monto(c.group(1))
+            if valor is None:
+                continue
+            moneda = _moneda(renglon) or _moneda(t[m.end(): m.end() + 60]) or _moneda(t[:2500])
+            return valor, moneda
+    return None, None
+
+
+def detectar_cliente_oc(texto: str | None, clientes: list[tuple[int, str, str]],
+                        rfc_propio: str = "MSF140227BF7") -> int | None:
+    """
+    id del cliente que emitió la OC, buscando en el PDF su RFC y, si no,
+    su razón social. `clientes` = [(id, rfc, nombre), ...].
+
+    Solo responde si hay UN candidato claro: con dos posibles (una OC que
+    menciona a dos empresas) prefiere no adivinar.
+    """
+    if not texto or not clientes:
+        return None
+    plano = re.sub(r"[^A-Z0-9]", "", _sin_acentos(texto))
+    por_rfc = {
+        cid for cid, rfc, _ in clientes
+        if rfc and rfc.upper() != rfc_propio
+        and len(re.sub(r"[^A-Z0-9]", "", rfc.upper())) >= 12
+        and re.sub(r"[^A-Z0-9]", "", rfc.upper()) in plano
+    }
+    if len(por_rfc) == 1:
+        return por_rfc.pop()
+
+    cabeza = re.sub(r"[^A-Z0-9 ]", " ", _sin_acentos(texto[:3000]))
+    cabeza = " " + re.sub(r"\s+", " ", cabeza) + " "
+    encontrados = []
+    for cid, _rfc, nombre in clientes:
+        n = re.sub(r"[^A-Z0-9 ]", " ", _sin_acentos(nombre or ""))
+        palabras = re.sub(r"\s+", " ", n).strip().split(" ")
+        if "MONSORT" in palabras:
+            continue
+        # El nombre completo y, si no aparece, sus prefijos de 3+ palabras:
+        # en la base está "NPA DE MEXICO JABIL" y la OC dice "NPA de Mexico
+        # S. de R.L. de C.V.".
+        for k in range(len(palabras), 2, -1) if len(palabras) > 3 else [len(palabras)]:
+            candidato = " ".join(palabras[:k])
+            if len(candidato) < 5:
+                break
+            pos = cabeza.find(" " + candidato + " ")
+            if pos >= 0:
+                encontrados.append((pos, -len(candidato), cid))
+                break
+    if not encontrados:
+        return None
+    encontrados.sort()
+    # El nombre que aparece primero (el encabezado es del comprador); en
+    # empate de posición, el nombre más largo ("NPA DE MEXICO JABIL" > "NPA").
+    ids = {c for _, _, c in encontrados}
+    return encontrados[0][2] if len(ids) == 1 or encontrados[0][0] < encontrados[1][0] else None

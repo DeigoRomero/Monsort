@@ -150,6 +150,9 @@ export function FacturasRecibidas() {
   const [fechaHasta, setFechaHasta] = useState("");
 
   const [descargandoReporte, setDescargandoReporte] = useState(false);
+  // Error del reporte aparte del error del listado: antes compartían estado
+  // y un reporte fallido escondía toda la tabla.
+  const [errorReporte, setErrorReporte] = useState<string | null>(null);
   const [sincronizando, setSincronizando] = useState(false);
   const [errorSincronizacion, setErrorSincronizacion] = useState<string | null>(null);
   const { session } = useAuth();
@@ -239,10 +242,15 @@ export function FacturasRecibidas() {
 
   async function handleReporteGeneral() {
     setDescargandoReporte(true);
+    setErrorReporte(null);
     try {
       await descargarReporteRecibidas(filtrosActuales());
-    } catch {
-      setError("No se pudo generar el reporte.");
+    } catch (err) {
+      setErrorReporte(
+        err instanceof ApiError
+          ? `No se pudo generar el reporte (${err.status}): ${err.message}`
+          : "No se pudo generar el reporte: sin respuesta del servidor."
+      );
     } finally {
       setDescargandoReporte(false);
     }
@@ -323,6 +331,12 @@ export function FacturasRecibidas() {
         se pueden editar, vincular ni cancelar desde aquí; cualquier corrección se
         hace ante el SAT.
       </p>
+
+      {errorReporte && (
+        <p className="facturas-status facturas-status-error" role="alert" style={{ margin: 0 }}>
+          {errorReporte}
+        </p>
+      )}
 
       <div className="facturas-filtros">
         <div className="filtros-barra">

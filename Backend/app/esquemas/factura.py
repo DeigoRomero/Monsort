@@ -129,7 +129,7 @@ class FiltrosFactura(BaseModel):
         def listar(filtros: FiltrosFactura = Depends(), db: Session = Depends(get_db)):
     """
     # Búsqueda libre (OR sobre los 4 campos)
-    q: str | None = None                        # cliente, UUID, folio_interno, numero_oc
+    q: str | None = None                        # cliente, UUID, folio_interno, numero_oc o monto
 
     # Filtros exactos
     cliente: str | None = None                  # ilike

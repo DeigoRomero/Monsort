@@ -11,6 +11,7 @@ from sqlalchemy.orm import Session, load_only
 from sqlalchemy import func, case, and_, or_
 from decimal import Decimal
 from datetime import date
+import re
 
 from app.modelos.factura import Facturas
 from app.modelos.estados import Estados
@@ -52,6 +53,47 @@ def existe_cp_activo(db: Session):
     )
 
 
+_RE_MONTO = re.compile(r"^\$?\s*(\d{1,3}(?:,\d{3})+|\d+)(?:\.(\d{1,2}))?\s*(?:MXN|USD)?$", re.I)
+
+
+def interpretar_monto(texto: str | None) -> tuple[Decimal, bool] | None:
+    """
+    ¿El texto de búsqueda es un monto? Devuelve (valor, con_centavos).
+
+        "1414"       -> (1414, False)   cualquier 1,414.xx
+        "1,414.00"   -> (1414.00, True) exactamente 1,414.00
+        "$12,500.5"  -> (12500.50, True)
+        "NHY13E2871" -> None            no es monto
+    """
+    if not texto:
+        return None
+    m = _RE_MONTO.match(texto.strip())
+    if not m:
+        return None
+    entero = m.group(1).replace(",", "")
+    centavos = m.group(2)
+    if centavos is None:
+        return Decimal(entero), False
+    return Decimal(f"{entero}.{centavos.ljust(2, '0')}"), True
+
+
+def condiciones_monto(texto: str | None, *columnas) -> list:
+    """
+    Condiciones para encontrar un monto en cualquiera de las columnas.
+
+    Sin centavos compara la parte entera ("1414" encuentra 1,414.00 y
+    1,414.80): la gente suele recordar el monto redondo, no los centavos.
+    Con centavos compara exacto.
+    """
+    monto = interpretar_monto(texto)
+    if not monto:
+        return []
+    valor, con_centavos = monto
+    if con_centavos:
+        return [col == valor for col in columnas]
+    return [func.trunc(col) == valor for col in columnas]
+
+
 def construir_query_facturas(db: Session, filtros: FiltrosFactura):
     """
     Devuelve un Query de SQLAlchemy sin ejecutar.
@@ -91,17 +133,22 @@ def construir_query_facturas(db: Session, filtros: FiltrosFactura):
             Estados.nombre_estado != "Cancelada"
         )
 
-    # --- Búsqueda libre (OR sobre 4 campos) ---
+    # --- Búsqueda libre: texto (cliente, UUID, folio, OC) O monto ---
     if filtros.q:
-        termino = f"%{filtros.q}%"
-        q = q.filter(
-            or_(
-                Facturas.cliente.ilike(termino),
-                Facturas.folio_fiscal.ilike(termino),
-                Facturas.folio_interno.ilike(termino),
-                Facturas.numero_oc.ilike(termino),
-            )
-        )
+        termino = f"%{filtros.q.strip()}%"
+        condiciones = [
+            Facturas.cliente.ilike(termino),
+            Facturas.folio_interno.ilike(termino),
+            Facturas.numero_oc.ilike(termino),
+        ]
+        # Un número corto ("165") aparece por casualidad dentro de cientos de
+        # UUID y llenaba la tabla de ruido cuando se buscaba un monto. En el
+        # UUID solo se busca texto con letras o un número largo (pedazo real
+        # de un folio fiscal).
+        if not interpretar_monto(filtros.q) or len(filtros.q.strip()) >= 8:
+            condiciones.append(Facturas.folio_fiscal.ilike(termino))
+        condiciones += condiciones_monto(filtros.q, Facturas.subtotal, Facturas.iva, Facturas.total)
+        q = q.filter(or_(*condiciones))
 
     # --- Filtro por cliente ---
     if filtros.cliente:

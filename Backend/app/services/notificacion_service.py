@@ -26,7 +26,6 @@ from sqlalchemy.orm import Session
 
 from app.modelos.complemento_pago import ComplementosPago
 from app.modelos.configuracion import Configuracion_sistema
-from app.modelos.correo_procesado import CorreosFallidos
 from app.modelos.factura import Facturas
 from app.modelos.notificacion import Notificaciones
 from app.modelos.orden_compra import OrdenesCompra
@@ -51,7 +50,6 @@ def instantanea(db: Session) -> dict:
         "id_factura": _max(db, Facturas.id_factura),
         "id_cp": _max(db, ComplementosPago.id),
         "id_oc": _max(db, OrdenesCompra.id),
-        "id_fallido": _max(db, CorreosFallidos.id),
         "vinculadas_oc": db.query(func.count(Facturas.id_factura))
             .filter(Facturas.id_orden_compra.isnot(None)).scalar() or 0,
         "liquidadas": db.query(func.count(Facturas.id_factura))
@@ -116,9 +114,6 @@ def registrar_revision_gmail(db: Session, antes: dict) -> Notificaciones | None:
         ocs = db.query(OrdenesCompra.numero_oc, OrdenesCompra.confianza_oc).filter(
             OrdenesCompra.id > antes["id_oc"]
         ).order_by(OrdenesCompra.id).all()
-        fallidos = db.query(func.count(CorreosFallidos.id)).filter(
-            CorreosFallidos.id > antes["id_fallido"]
-        ).scalar() or 0
         despues = instantanea(db)
         nuevas_vinculadas = max(0, despues["vinculadas_oc"] - antes["vinculadas_oc"])
         nuevas_liquidadas = max(0, despues["liquidadas"] - antes["liquidadas"])
@@ -150,10 +145,9 @@ def registrar_revision_gmail(db: Session, antes: dict) -> Notificaciones | None:
         if nuevas_liquidadas:
             partes.append(_plural(nuevas_liquidadas, "factura liquidada", "facturas liquidadas"))
             seccion = seccion or "facturas"
-        if fallidos:
-            partes.append(_plural(fallidos, "correo no se pudo procesar",
-                                  "correos no se pudieron procesar"))
-            detalle.append("Se reintentarán automáticamente cada 10 minutos.")
+        # Los correos que fallan NO se avisan (decisión del cliente, 14/10/2026):
+        # el reproceso automático los recupera solo y el aviso no aportaba
+        # nada accionable. Siguen en CorreosFallidos y en el log.
 
         _guardar_ultima_revision(db, ahora)
 
@@ -163,7 +157,7 @@ def registrar_revision_gmail(db: Session, antes: dict) -> Notificaciones | None:
                 db, tipo="correo",
                 titulo="Revisión de Gmail: " + ", ".join(partes),
                 detalle="\n".join(detalle) or None,
-                nivel="aviso" if fallidos and not (facturas or ocs or cps) else "info",
+                nivel="info",
                 seccion=seccion,
             )
         db.commit()

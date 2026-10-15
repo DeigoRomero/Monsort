@@ -16,6 +16,8 @@ Por defecto NO escribe nada (muestra lo que cambiaría). Uso, desde Backend/:
     python -m app.services.redetectar_oc --buscar-cuerpo --desde 2026-09-01 --hasta 2026-09-30 --aplicar
 
 Reglas al aplicar:
+  - Monto, moneda y cliente (desde el 14/10/2026) se llenan solo donde
+    están vacíos.
   - Si el usuario NO había corregido el número (numero_oc == numero_oc_detectado),
     se reemplaza por el nuevo.
   - Si el usuario SÍ lo corrigió a mano, se respeta su valor; solo se anota
@@ -43,10 +45,32 @@ from app.services.detector_oc import detectar_numero_oc, es_documento_oc
 logger = logging.getLogger(__name__)
 
 
+def _completar_datos_comerciales(db, oc, texto: str, aplicar: bool, resumen: dict) -> None:
+    """
+    Llena monto/moneda y cliente de OCs anteriores al 14/10/2026. Solo
+    rellena lo vacío: un monto o cliente que alguien capturó no se toca.
+    El cliente que no salga del PDF lo pone reconciliar() desde la factura.
+    """
+    if oc.monto is not None and oc.id_cliente is not None:
+        return
+    from app.services.factura_service import datos_comerciales_oc
+
+    datos = datos_comerciales_oc(db, texto)
+    if oc.monto is None and datos["monto"] is not None:
+        resumen["monto_nuevo"] += 1
+        if aplicar:
+            oc.monto, oc.moneda = datos["monto"], datos["moneda"] or "MXN"
+    if oc.id_cliente is None and datos["id_cliente"] is not None:
+        resumen["cliente_nuevo"] += 1
+        if aplicar:
+            oc.id_cliente = datos["id_cliente"]
+
+
 def redetectar_existentes(db, aplicar: bool) -> dict:
     from app.services.factura_service import extraer_texto_y_palabras_pdf
 
-    resumen = {"revisadas": 0, "cambian": 0, "respetadas": 0, "no_parecen_oc": 0, "iguales": 0}
+    resumen = {"revisadas": 0, "cambian": 0, "respetadas": 0, "no_parecen_oc": 0, "iguales": 0,
+               "monto_nuevo": 0, "cliente_nuevo": 0}
     ocs = db.query(OrdenesCompra).order_by(OrdenesCompra.id).all()
     print(f"{'id':>5}  {'actual':<18} {'nuevo':<18} {'conf.':<8} archivo")
     for oc in ocs:
@@ -62,6 +86,8 @@ def redetectar_existentes(db, aplicar: bool) -> dict:
             resumen["no_parecen_oc"] += 1
             print(f"{oc.id:>5}  {str(oc.numero_oc):<18} {'(no parece OC)':<18} {'':<8} {oc.nombre_archivo}")
             continue
+
+        _completar_datos_comerciales(db, oc, texto, aplicar, resumen)
 
         r = detectar_numero_oc(texto_pdf=texto, palabras_pdf=palabras,
                                nombre_archivo=oc.nombre_archivo)

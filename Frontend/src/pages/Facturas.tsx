@@ -133,6 +133,9 @@ export function Facturas() {
   const [fechaHasta, setFechaHasta] = useState("");
 
   const [descargandoReporte, setDescargandoReporte] = useState(false);
+  // Error del reporte aparte del error del listado: antes compartían estado
+  // y un reporte fallido escondía toda la tabla.
+  const [errorReporte, setErrorReporte] = useState<string | null>(null);
 
   useEffect(() => {
     listarEstados().then(setEstados).catch(() => {});
@@ -191,10 +194,15 @@ export function Facturas() {
 
   async function handleReporteGeneral() {
     setDescargandoReporte(true);
+    setErrorReporte(null);
     try {
       await descargarReporteGeneral(filtrosActuales());
-    } catch {
-      setError("No se pudo generar el reporte general.");
+    } catch (err) {
+      setErrorReporte(
+        err instanceof ApiError
+          ? `No se pudo generar el reporte (${err.status}): ${err.message}`
+          : "No se pudo generar el reporte: sin respuesta del servidor."
+      );
     } finally {
       setDescargandoReporte(false);
     }
@@ -242,11 +250,17 @@ export function Facturas() {
         </button>
       </div>
 
+      {errorReporte && (
+        <p className="facturas-status facturas-status-error" role="alert" style={{ margin: 0 }}>
+          {errorReporte}
+        </p>
+      )}
+
       <div className="facturas-filtros">
         <div className="filtros-barra">
           <input
             className="field-input facturas-buscador"
-            placeholder="Buscar por cliente, UUID, folio interno u OC…"
+            placeholder="Buscar por cliente, UUID, folio interno, OC o monto…"
             value={q}
             onChange={(e) => setQ(e.target.value)}
           />

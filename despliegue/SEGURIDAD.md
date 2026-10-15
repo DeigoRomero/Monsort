@@ -1,3 +1,43 @@
+# Despliegue del 14/10/2026: filtros de órdenes de compra
+
+Cambios: búsqueda por monto en facturas emitidas, filtros en órdenes de
+compra (cliente, fecha, monto, con/sin factura), la notificación "X correos
+no se pudieron procesar" ya no se genera. Incluye también el arreglo del
+Reporte general (error 500 con facturas de muchos conceptos) si no se
+había desplegado.
+
+En Windows:
+
+```powershell
+cd D:\ProyectoMonsort
+git status                      # revisar que NO aparezca ningún .env ni pruebas_oc/
+git add -A
+git commit -m "Filtros de OC, busqueda por monto, sin aviso de correos fallidos"
+git pull --no-rebase origin main
+git push origin main
+```
+
+En el VPS:
+
+```bash
+ssh monsort@64.177.80.14
+cd /srv/monsort
+sudo -u postgres pg_dump -Fc MonsortDB > ~/respaldo_$(date +%Y%m%d_%H%M).dump
+./despliegue.sh                 # git pull, migración c5e2f8a4b913, build, reinicio
+
+# Llenar monto, moneda y cliente de las OCs que ya existían
+cd /srv/monsort/ProyectoMonsort/Backend
+../../.venv/bin/python -m app.services.redetectar_oc              # vista previa
+../../.venv/bin/python -m app.services.redetectar_oc --aplicar
+```
+
+La migración `c5e2f8a4b913` solo agrega columnas (`monto`, `moneda`) y un
+índice; no borra nada. El script solo llena lo que está vacío: un monto o
+cliente capturado a mano no se toca. Las OCs nuevas ya llegan con monto y
+cliente desde el PDF.
+
+---
+
 # Despliegue de las correcciones del 30/09/2026
 
 Seguridad, detector de órdenes de compra, días para pago, notificaciones y
@@ -53,11 +93,11 @@ sudo systemctl daemon-reload
 # 5. Despliegue (migraciones, build, copia a /var/www/monsort, reinicio)
 ./despliegue.sh
 
-# 6. nginx. El archivo del sitio NO se llama necesariamente "monsort":
-#    buscar cuál es el que está activo.
-grep -rl "facturas.grupomonsort.com" /etc/nginx/sites-enabled/ /etc/nginx/conf.d/ 2>/dev/null
-ls -l /etc/nginx/sites-enabled/
-SITIO=/etc/nginx/sites-available/NOMBRE_QUE_SALIO    # <- ajustar
+# 6. nginx. En este VPS el sitio activo es sites-enabled/monsort-nginx.conf
+#    (confirmar con: sudo nginx -T | grep "# configuration file").
+#    readlink -f da el archivo real aunque sea un enlace.
+SITIO=$(readlink -f /etc/nginx/sites-enabled/monsort-nginx.conf); echo "$SITIO"
+ls /etc/letsencrypt/ssl-dhparams.pem /etc/letsencrypt/options-ssl-nginx.conf
 sudo cp "$SITIO" ~/nginx-sitio.respaldo
 sudo cp ProyectoMonsort/despliegue/nginx-seguridad.conf /etc/nginx/snippets/monsort-seguridad.conf
 sudo cp ProyectoMonsort/despliegue/nginx-proxy.conf     /etc/nginx/snippets/monsort-proxy.conf

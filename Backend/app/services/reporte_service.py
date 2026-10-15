@@ -1,6 +1,7 @@
 # app/services/reporte_service.py
 
 import io
+from xml.sax.saxutils import escape
 import os
 from datetime import date, datetime
 from decimal import Decimal, ROUND_HALF_UP
@@ -68,9 +69,38 @@ def _fmt_fecha(valor) -> str:
     return str(valor)
 
 
-def _descripcion_conceptos(conceptos: list) -> str:
-    partes = [c.descripcion for c in conceptos if c.descripcion]
-    return "; ".join(partes) if partes else "—"
+# Tope de largo de la descripción en cada reporte. Una fila de tabla de
+# ReportLab NO se parte entre páginas: si una factura trae decenas de
+# conceptos, su celda crece más que la hoja y el reporte entero truena con
+# LayoutError (pasó el 30/09/2026 en producción: fila de 728 pt en una hoja
+# de 515). El detalle completo siempre está en el PDF de la factura.
+MAX_DESCRIPCION_GENERAL = 350
+MAX_DESCRIPCION_DETALLE = 2500
+
+
+def _texto(valor) -> str:
+    """
+    Texto seguro para Paragraph. ReportLab interpreta <b>, <font>, &... como
+    marcado: una descripción con "<" o "&" rompía la celda o el reporte.
+    """
+    if valor is None:
+        return "—"
+    return escape(str(valor))
+
+
+def _descripcion_conceptos(conceptos: list, max_chars: int | None = None) -> str:
+    """Descripciones unidas con '; ', recortadas a max_chars (ya escapadas)."""
+    partes = [c.descripcion.strip() for c in conceptos if c.descripcion and c.descripcion.strip()]
+    if not partes:
+        return "—"
+    texto = "; ".join(partes)
+    if max_chars and len(texto) > max_chars:
+        corte = texto[:max_chars].rsplit(" ", 1)[0].rstrip(";, ")
+        incluidos = corte.count("; ") + 1
+        faltan = len(partes) - incluidos
+        sufijo = f" … (+{faltan} concepto{'s' if faltan != 1 else ''} más)" if faltan > 0 else " …"
+        return escape(corte) + sufijo
+    return escape(texto)
 
 
 def _tiene_cp_activo(db: Session, id_factura: int) -> bool:
@@ -141,7 +171,9 @@ def _encabezado(story, titulo_texto: str, subtitulo_texto: str, estilos: dict):
         story.append(logo)
     story.append(Spacer(1, 0.3 * cm))
     story.append(Paragraph(titulo_texto, estilos["titulo"]))
-    story.append(Paragraph(subtitulo_texto, estilos["subtitulo"]))
+    # El subtítulo lleva lo que el usuario escribió en los filtros y nombres
+    # de clientes ("S&P"): se escapa para que ReportLab no lo lea como marcado.
+    story.append(Paragraph(escape(subtitulo_texto), estilos["subtitulo"]))
     story.append(Paragraph(
         f"Generado el {datetime.now().strftime('%d/%m/%Y %H:%M')}",
         estilos["subtitulo"],
@@ -180,11 +212,14 @@ def _tabla_dos_columnas(datos: list, estilos: dict) -> Table:
     for i, fila in enumerate(datos):
         estilo_val = estilos["celda_bold"] if i == 0 else estilos["celda"]
         filas.append([
-            Paragraph(str(fila[0]), estilos["celda_bold"]),
-            Paragraph(str(fila[1]), estilo_val),
+            Paragraph(_texto(fila[0]), estilos["celda_bold"]),
+            # La descripción ya viene escapada (y recortada); el resto no.
+            Paragraph(fila[1] if fila[0] == "Descripción" else _texto(fila[1]), estilo_val),
         ])
     n = len(filas)
-    tabla = Table(filas, colWidths=[5 * cm, 11 * cm])
+    # splitInRow: una fila más alta que la hoja se parte en dos páginas en
+    # lugar de tumbar el reporte (red de seguridad además del recorte).
+    tabla = Table(filas, colWidths=[5 * cm, 11 * cm], splitInRow=1)
     estilo = _estilo_tabla_base(n)
     estilo.add("BACKGROUND", (0, 1), (0, -1), colors.HexColor("#E8EDF5"))
     tabla.setStyle(estilo)
@@ -295,7 +330,7 @@ def generar_reporte_general(db: Session, filtros: FiltrosFactura,
 
     for f in facturas:
         conceptos    = db.query(Conceptos).filter(Conceptos.id_factura == f.id_factura).all()
-        descripcion  = _descripcion_conceptos(conceptos)
+        descripcion  = _descripcion_conceptos(conceptos, MAX_DESCRIPCION_GENERAL)
         total_mxn    = _total_mxn(f)
         importe_mxn  = _importe_mxn(f)
 
@@ -318,14 +353,14 @@ def generar_reporte_general(db: Session, filtros: FiltrosFactura,
             )
 
         filas.append([
-            Paragraph(f.folio_fiscal  or "—", estilos["celda"]),
-            Paragraph(f.folio_interno or "—", estilos["celda"]),
-            Paragraph(f.numero_oc     or "—", estilos["celda"]),
+            Paragraph(_texto(f.folio_fiscal),  estilos["celda"]),
+            Paragraph(_texto(f.folio_interno), estilos["celda"]),
+            Paragraph(_texto(f.numero_oc),     estilos["celda"]),
             Paragraph(descripcion,             estilos["celda"]),
             Paragraph(_fmt_decimal(f.subtotal),estilos["celda"]),
             Paragraph(_fmt_decimal(f.iva),     estilos["celda"]),
             Paragraph(_fmt_decimal(f.total),   estilos["celda"]),
-            Paragraph(f.moneda or "MXN",       estilos["celda"]),
+            Paragraph(_texto(f.moneda or "MXN"), estilos["celda"]),
             celda_total,
             Paragraph(_fmt_fecha(f.fecha),     estilos["celda"]),
         ])
@@ -352,7 +387,7 @@ def generar_reporte_general(db: Session, filtros: FiltrosFactura,
     datos_tabla = encabezado_tabla + filas + [fila_total]
     n = len(datos_tabla)
 
-    tabla  = Table(datos_tabla, colWidths=col_widths, repeatRows=1)
+    tabla  = Table(datos_tabla, colWidths=col_widths, repeatRows=1, splitInRow=1)
     estilo = _estilo_tabla_base(n)
     estilo.add("BACKGROUND", (0, n-1), (-1, n-1), AZUL_CLARO)
     estilo.add("TEXTCOLOR",  (0, n-1), (-1, n-1), BLANCO)
@@ -412,7 +447,7 @@ def generar_reporte_detalle(db: Session, id_factura: int) -> bytes:
     story.append(Paragraph("1. Datos de la Factura", estilos["seccion"]))
 
     conceptos   = db.query(Conceptos).filter(Conceptos.id_factura == id_factura).all()
-    descripcion = _descripcion_conceptos(conceptos)
+    descripcion = _descripcion_conceptos(conceptos, MAX_DESCRIPCION_DETALLE)
     total_mxn   = _total_mxn(f)
 
     total_mxn_txt = (

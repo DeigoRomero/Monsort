@@ -19,7 +19,7 @@ logger = logging.getLogger(__name__)
 def job_procesar_correos():
     """
     Revisión de Gmail cada 5 minutos. Al terminar deja una notificación con
-    lo que cambió (facturas, OCs, CPs, vínculos, fallos) para la pantalla.
+    lo que cambió (facturas, OCs, CPs, vínculos) para la pantalla.
     """
     from app.services.notificacion_service import instantanea, registrar_revision_gmail
 
@@ -54,9 +54,7 @@ def job_reprocesar_fallidos():
         logger.info("Reproceso de correos: %d pendiente(s) en cola", pendientes)
         antes = instantanea(db)
         reprocesar_fallidos(db, limite=40)
-        # Lo que el reproceso recupere también se avisa. Los fallos de este
-        # ciclo no cuentan como "nuevos" (son reintentos de los mismos).
-        antes["id_fallido"] = instantanea(db)["id_fallido"]
+        # Lo que el reproceso recupere también se avisa.
         registrar_revision_gmail(db, antes)
     except Exception:
         logger.exception("Error en el job de reproceso de correos fallidos")

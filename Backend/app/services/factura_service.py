@@ -6,6 +6,7 @@ from app.services.gmail_service import (
 from app.services.detector_oc import (
     detectar_numero_oc, es_documento_oc, clave_oc, nucleo_numerico,
     cuerpo_es_orden_de_compra, extraer_numero_oc as _extraer_numero_oc_nuevo,
+    detectar_monto_oc, detectar_cliente_oc,
 )
 from app.services.usuario_service import obtener_usuario_sistema, obtener_estado_pendiente
 from google.auth.exceptions import RefreshError
@@ -732,6 +733,21 @@ def procesar_complemento_pago(xml_bytes, mensaje_id, db, indice_pdfs) -> bool:
     return True
 
 
+def datos_comerciales_oc(db, texto: str | None) -> dict:
+    """
+    Monto (sin IVA si viene desglosado), moneda y cliente de una OC, para
+    los filtros de la pantalla de órdenes de compra. Vacíos si no se ven
+    claros: reconciliar() completa el cliente al vincular la factura.
+    """
+    monto, moneda = detectar_monto_oc(texto)
+    clientes = [(c.id, c.rfc, c.nombre) for c in db.query(Cliente.id, Cliente.rfc, Cliente.nombre)]
+    return {
+        "monto": monto,
+        "moneda": moneda,
+        "id_cliente": detectar_cliente_oc(texto, clientes, settings.RFC_EMPRESA),
+    }
+
+
 def procesar_orden_compra_suelta(item_indice, asunto, mensaje_id, db,
                                  cuerpo: str | None = None) -> bool:
     """
@@ -771,6 +787,7 @@ def procesar_orden_compra_suelta(item_indice, asunto, mensaje_id, db,
         numero_oc=numero_detectado,
         numero_oc_detectado=numero_detectado,
         confianza_oc=resultado.confianza,
+        **datos_comerciales_oc(db, item_indice.get("texto") or cuerpo),
         archivo=pdf_bytes,
         nombre_archivo=nombre_pdf,
         hash_archivo=hash_archivo,
@@ -844,6 +861,7 @@ def procesar_oc_en_cuerpo(asunto: str, cuerpo: str, remitente: str,
         numero_oc=resultado.numero,
         numero_oc_detectado=resultado.numero,
         confianza_oc=resultado.confianza,
+        **datos_comerciales_oc(db, cuerpo),
         archivo=pdf,
         nombre_archivo=f"OC_{re.sub(r'[^A-Za-z0-9_-]', '_', resultado.numero)}_correo.pdf",
         hash_archivo=hashlib.sha256(
@@ -1100,6 +1118,17 @@ def reconciliar(db):
             if len(candidatas) == 1:
                 factura.id_orden_compra = candidatas[0].id
 
+    db.flush()
+
+    # Cliente de la OC desde su factura, cuando el PDF no lo dejó claro.
+    # La factura es la fuente más confiable: su RFC receptor viene del XML.
+    sin_cliente = db.query(OrdenesCompra).filter(OrdenesCompra.id_cliente.is_(None)).all()
+    for oc in sin_cliente:
+        fila = db.query(Facturas.id_cliente).filter(
+            Facturas.id_orden_compra == oc.id, Facturas.id_cliente.isnot(None)
+        ).first()
+        if fila:
+            oc.id_cliente = fila[0]
     db.flush()
 
     # --- 3. fecha_liquidacion (todas) y estado (solo las no terminales) ---

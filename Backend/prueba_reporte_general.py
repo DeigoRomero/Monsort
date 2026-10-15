@@ -196,6 +196,28 @@ pdf = generar_reporte_general(
 afirmar("ciclocompleto" in plano(texto_pdf(pdf)),
         "y con la casilla prendida si lo explica")
 
+
+print("\n[6] Una factura con muchisimos conceptos no tumba el reporte")
+# 30/09/2026 en produccion: una factura con decenas de conceptos hizo una
+# fila de 728 pt en una hoja de 515 y el reporte entero dio error 500
+# (LayoutError de ReportLab: una fila no se parte entre paginas).
+from app.modelos.conceptos import Conceptos  # noqa: E402
+for i in range(60):
+    db.add(Conceptos(id_factura=completa.id_factura,
+                     descripcion=f"Concepto {i} <Botas> & proteccion " * 4,
+                     cantidad=1, unidad="H87", precio_unitario=1, importe=1))
+db.commit()
+try:
+    pdf = generar_reporte_general(db, FiltrosFactura(cliente="S&P <raro>"))
+    pdf = generar_reporte_general(db, FiltrosFactura())
+    texto = plano(texto_pdf(pdf))
+    afirmar(True, "el reporte se genera")
+    afirmar("conceptosmás" in texto, "la descripcion se recorta y dice cuantos conceptos faltan")
+    afirmar("<Botas>" in texto_pdf(pdf) or "Botas" in texto,
+            "los caracteres < y & no rompen la celda")
+except Exception as e:  # noqa: BLE001
+    afirmar(False, f"el reporte se genera (fallo: {type(e).__name__})")
+
 db.close()
 
 print()

@@ -11,14 +11,39 @@ export interface OrdenCompra {
   sin_factura_30_dias: boolean;
   /** alta | media | baja | ninguna | manual (null: detectada antes del 30/09/2026) */
   confianza_oc: string | null;
+  id_cliente: number | null;
+  cliente: string | null;
+  /** Antes de IVA cuando la OC lo desglosa; si no, el total. Decimal como texto. */
+  monto: string | null;
+  moneda: string | null;
 }
 
 export interface OrdenCompraActualizar {
-  numero_oc?: string | null;
+  numero_oc?: string;
+  id_cliente?: number | null;
+  monto?: string | null;
+  moneda?: string | null;
 }
 
-export function listarOrdenes(): Promise<OrdenCompra[]> {
-  return apiFetch<OrdenCompra[]>("/ordenes-compra/");
+export interface FiltrosOrdenCompra {
+  q?: string;
+  id_cliente?: number;
+  fecha_desde?: string;
+  fecha_hasta?: string;
+  monto_min?: string;
+  monto_max?: string;
+  con_factura?: boolean;
+}
+
+export function listarOrdenes(filtros: FiltrosOrdenCompra = {}): Promise<OrdenCompra[]> {
+  const params = new URLSearchParams();
+  for (const [clave, valor] of Object.entries(filtros)) {
+    if (valor !== undefined && valor !== null && valor !== "") {
+      params.set(clave, String(valor));
+    }
+  }
+  const qs = params.toString();
+  return apiFetch<OrdenCompra[]>(`/ordenes-compra/${qs ? `?${qs}` : ""}`);
 }
 
 export function obtenerOrden(idOc: number): Promise<OrdenCompra> {
